@@ -70,5 +70,14 @@ export const api = {
   listeners: () => request<Listener[]>("/api/listeners"),
 
   updateCheck: () => request<UpdateStatus>("/api/update/check"),
-  updateInstall: () => request<{ ok: boolean; log: string }>("/api/update/install", { method: "POST" }),
+  // Deliberately doesn't use request(): we want the log/output even when the
+  // update script fails (non-2xx), instead of throwing it away.
+  updateInstall: async (): Promise<{ ok: boolean; log: string }> => {
+    const res = await fetch("/api/update/install", { method: "POST", credentials: "include" });
+    try {
+      return await res.json();
+    } catch {
+      return { ok: false, log: `Server returned ${res.status} ${res.statusText} with no readable output.` };
+    }
+  },
 };

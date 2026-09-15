@@ -3,6 +3,17 @@
 # Invoked by the web UI's "Install update" button, or run manually.
 set -euo pipefail
 
+# When this is spawned from the systemd-managed server process, PATH is
+# whatever systemd gave the service — which usually does NOT include
+# ~/.bun/bin. Make sure bun is findable regardless of how we got invoked.
+export PATH="$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "==> ERROR: 'bun' not found on PATH (checked \$HOME/.bun/bin, /usr/local/bin, /usr/bin, /bin)." >&2
+  echo "    HOME=${HOME:-<unset>} PATH=${PATH}" >&2
+  exit 1
+fi
+
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 echo "==> Fetching latest tags from origin"
