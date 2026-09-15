@@ -140,6 +140,12 @@ stations and their tracks. Each station is served as an M3U playlist at
 `/cliamp-radio/<slug>.m3u`, ready to hand to cliamp or any player that
 understands M3U.
 
+A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
+available and automatically kept in sync — it's the union of every other
+station's tracks with duplicates (matched by stream URL) removed. It's
+generated on the fly, shown read-only in the dashboard, and can't be edited,
+renamed, or deleted (the name "All" is reserved).
+
 ## Deploying with systemd + auto-update
 
 One-time setup — from the repo directory on your server:

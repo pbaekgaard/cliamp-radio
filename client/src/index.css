@@ -262,6 +262,20 @@ input {
   align-items: center;
 }
 
+.badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--muted, #9aa0a6);
+  vertical-align: middle;
+}
+
 .track-row {
   display: grid;
   grid-template-columns: 1fr 2fr auto;

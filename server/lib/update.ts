@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import path from "node:path";
 
 const REPO = process.env.GITHUB_REPO || "pbaekgaard/cliamp-radio";
@@ -16,8 +16,32 @@ let cachedRelease: ReleaseInfo | null = null;
 let cachedAt = 0;
 const CACHE_MS = 5 * 60 * 1000;
 
+let cachedVersion: string | null = null;
+
+/**
+ * The running version. Prefers an explicit APP_VERSION override (useful for
+ * local dev / testing), otherwise derives it from the nearest git tag —
+ * since update.sh always checks out an exact release tag, this reflects the
+ * actually-installed version without needing anyone to remember to bump an
+ * env var on every release. Cached for the process lifetime; a fresh value
+ * is naturally picked up after the restart that follows every update.
+ */
 export function getCurrentVersion(): string {
-  return process.env.APP_VERSION || "0.0.0";
+  if (cachedVersion) return cachedVersion;
+  if (process.env.APP_VERSION) {
+    cachedVersion = process.env.APP_VERSION;
+    return cachedVersion;
+  }
+  try {
+    const tag = execFileSync("git", ["describe", "--tags", "--abbrev=0"], {
+      cwd: REPO_ROOT,
+      encoding: "utf-8",
+    }).trim();
+    cachedVersion = tag || "0.0.0";
+  } catch {
+    cachedVersion = "0.0.0";
+  }
+  return cachedVersion;
 }
 
 async function fetchLatestRelease(): Promise<ReleaseInfo | null> {

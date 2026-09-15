@@ -7,6 +7,7 @@ export interface Station {
   slug: string;
   name: string;
   tracks: Track[];
+  virtual?: boolean;
 }
 
 export interface Listener {

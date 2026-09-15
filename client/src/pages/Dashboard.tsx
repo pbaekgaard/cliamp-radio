@@ -100,16 +100,23 @@ export default function Dashboard() {
           <div className="station-card" key={s.slug}>
             <div className="station-card-head">
               <div>
-                <h3>{s.name}</h3>
+                <h3>
+                  {s.name}
+                  {s.virtual && <span className="badge">auto-generated</span>}
+                </h3>
                 <span className="muted">/cliamp-radio/{s.slug}.m3u · {s.tracks.length} track(s)</span>
               </div>
               <div className="header-actions">
-                <button className="btn-secondary" onClick={() => startEdit(s)}>
-                  Edit
-                </button>
-                <button className="btn-danger" onClick={() => remove(s.slug)}>
-                  Delete
-                </button>
+                {!s.virtual && (
+                  <>
+                    <button className="btn-secondary" onClick={() => startEdit(s)}>
+                      Edit
+                    </button>
+                    <button className="btn-danger" onClick={() => remove(s.slug)}>
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

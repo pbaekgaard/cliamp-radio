@@ -12,6 +12,7 @@ import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } 
 import {
   deleteStation,
   getStation,
+  isReservedSlug,
   listStations,
   renderM3U,
   saveStation,
@@ -121,6 +122,9 @@ const server = Bun.serve({
       if (!body?.name || !Array.isArray(body.tracks)) {
         return json({ error: "name and tracks[] required" }, { status: 400 });
       }
+      if (isReservedSlug(slugify(body.name))) {
+        return json({ error: `"${body.name}" is a reserved station name` }, { status: 400 });
+      }
       const saved = await saveStation({ slug: slugify(body.name), name: body.name, tracks: body.tracks });
       return json(saved, { status: 201 });
     }
@@ -134,9 +138,15 @@ const server = Bun.serve({
       }
       if (req.method === "PUT") {
         if (!requireAuth(req)) return unauthorized();
+        if (isReservedSlug(slug)) {
+          return json({ error: "the All Stations playlist is generated automatically and can't be edited" }, { status: 400 });
+        }
         const body = (await req.json().catch(() => null)) as Partial<Station> | null;
         if (!body?.name || !Array.isArray(body.tracks)) {
           return json({ error: "name and tracks[] required" }, { status: 400 });
+        }
+        if (isReservedSlug(slugify(body.name))) {
+          return json({ error: `"${body.name}" is a reserved station name` }, { status: 400 });
         }
         if (slugify(body.name) !== slug) await deleteStation(slug);
         const saved = await saveStation({ slug, name: body.name, tracks: body.tracks });
@@ -144,6 +154,9 @@ const server = Bun.serve({
       }
       if (req.method === "DELETE") {
         if (!requireAuth(req)) return unauthorized();
+        if (isReservedSlug(slug)) {
+          return json({ error: "the All Stations playlist is generated automatically and can't be deleted" }, { status: 400 });
+        }
         const ok = await deleteStation(slug);
         return ok ? json({ ok: true }) : json({ error: "not found" }, { status: 404 });
       }

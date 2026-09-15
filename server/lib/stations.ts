@@ -12,7 +12,10 @@ export interface Station {
   slug: string;
   name: string;
   tracks: Track[];
+  virtual?: boolean;
 }
+
+export const ALL_STATION_SLUG = "all";
 
 export function slugify(name: string): string {
   return name
@@ -21,11 +24,15 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+export function isReservedSlug(slug: string): boolean {
+  return slug === ALL_STATION_SLUG;
+}
+
 async function ensureDir() {
   await mkdir(STATIONS_DIR, { recursive: true });
 }
 
-export async function listStations(): Promise<Station[]> {
+async function listRealStations(): Promise<Station[]> {
   await ensureDir();
   const files = (await readdir(STATIONS_DIR)).filter((f) => f.endsWith(".json"));
   const stations = await Promise.all(
@@ -37,7 +44,28 @@ export async function listStations(): Promise<Station[]> {
   return stations.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function buildAllStation(stations: Station[]): Station {
+  const seen = new Set<string>();
+  const tracks: Track[] = [];
+  for (const station of stations) {
+    for (const track of station.tracks) {
+      if (seen.has(track.path)) continue;
+      seen.add(track.path);
+      tracks.push(track);
+    }
+  }
+  return { slug: ALL_STATION_SLUG, name: "All Stations", tracks, virtual: true };
+}
+
+export async function listStations(): Promise<Station[]> {
+  const stations = await listRealStations();
+  return [buildAllStation(stations), ...stations];
+}
+
 export async function getStation(slug: string): Promise<Station | null> {
+  if (slug === ALL_STATION_SLUG) {
+    return buildAllStation(await listRealStations());
+  }
   await ensureDir();
   try {
     const raw = await readFile(path.join(STATIONS_DIR, `${slug}.json`), "utf-8");
@@ -48,9 +76,12 @@ export async function getStation(slug: string): Promise<Station | null> {
 }
 
 export async function saveStation(station: Station): Promise<Station> {
-  await ensureDir();
   const slug = slugify(station.name);
-  const toSave: Station = { ...station, slug };
+  if (isReservedSlug(slug)) {
+    throw new Error(`"${station.name}" is a reserved station name`);
+  }
+  await ensureDir();
+  const toSave: Station = { slug, name: station.name, tracks: station.tracks };
   await writeFile(
     path.join(STATIONS_DIR, `${slug}.json`),
     JSON.stringify(toSave, null, 2)
@@ -59,6 +90,7 @@ export async function saveStation(station: Station): Promise<Station> {
 }
 
 export async function deleteStation(slug: string): Promise<boolean> {
+  if (isReservedSlug(slug)) return false;
   await ensureDir();
   try {
     await rm(path.join(STATIONS_DIR, `${slug}.json`));
