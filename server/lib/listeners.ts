@@ -29,7 +29,17 @@ interface HistoryEntry {
   endedAt: number;
 }
 
-const TTL_MS = 10 * 60 * 1000; // a listener is considered "active" for 10 minutes after their last request
+// A listener is considered "active" for this long after their last request.
+// NOTE: cliamp fetches a station's .m3u exactly once when you tune in, then
+// plays the track URLs (e.g. YouTube links) directly -- it never re-requests
+// this server again for the rest of that listening session. So there's no
+// heartbeat to refresh this on, and the TTL has to be generous enough to
+// outlast a normal multi-hour listening session, or listeners who are still
+// tuned in will incorrectly appear to have left. A short TTL (e.g. 10 min)
+// caused exactly that. True real-time detection would require proxying
+// playback itself through this server; until then, err on the side of
+// "still listening" rather than "gone".
+const TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const listens = new Map<string, Listen>();
 
 const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
