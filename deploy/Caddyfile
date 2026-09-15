@@ -1,0 +1,9 @@
+# Reverse proxy for cliamp-radio: terminates TLS (auto Let's Encrypt cert +
+# renewal) on 443, redirects 80 -> 443, and forwards everything to the app.
+#
+# Install: sudo apt install -y caddy   (see README for the full setup)
+# Usage:   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl restart caddy
+
+ts.baekgaard.dev {
+	reverse_proxy localhost:8000
+}

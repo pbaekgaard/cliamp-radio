@@ -49,26 +49,52 @@ cd ../server && bun install && bun run start
 
 Or simply use `./start.sh --prod` from the repo root, which does both steps.
 
-### Exposing it on port 80
+### Exposing it directly on a low port (80/443) without a reverse proxy
 
-The server reads `PORT` from the environment (defaults to `8000`). On a cloud
-instance with port 80 open, run:
+The server reads `PORT` from the environment (defaults to `8000`). If you
+just want plain HTTP on port 80 with no TLS:
 
 ```bash
 sudo PORT=80 ./start.sh --prod
-```
-
-Running as root just to bind port 80 isn't ideal long-term. Instead, grant the
-`bun` binary permission to bind low ports once, then run as your normal user:
-
-```bash
+# or, without needing root each time:
 sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v bun)")"
 PORT=80 ./start.sh --prod
 ```
 
-The provided `systemd/cliamp-radio.service` unit already sets `PORT=80` and
-`AmbientCapabilities=CAP_NET_BIND_SERVICE` so the service can bind port 80
-while still running as an unprivileged user.
+### HTTPS (recommended): put Caddy in front
+
+For real deployments, run the app on its default port `8000` and put
+[Caddy](https://caddyserver.com) in front of it — it gets you a free,
+auto-renewing Let's Encrypt certificate and HTTP→HTTPS redirect with almost
+no config.
+
+```bash
+# Install Caddy (Debian/Ubuntu)
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+# Point Caddy at cliamp-radio — edit the domain in deploy/Caddyfile first
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+```
+
+Then run the app normally on 8000 (`./start.sh --prod`, or via the systemd
+unit below). Make sure ports 80 *and* 443 are allowed both in your cloud
+provider's firewall/security list **and** in the instance's own `iptables`
+(some cloud images, e.g. OCI's Ubuntu image, default to rejecting everything
+but SSH):
+
+```bash
+sudo iptables -I INPUT 5 -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT 5 -p tcp --dport 443 -j ACCEPT
+sudo netfilter-persistent save   # persist across reboots (apt install iptables-persistent if needed)
+```
+
+Caddy needs 80 briefly for the ACME HTTP challenge (then redirects to 443),
+so both ports must be open even though the app itself is only reachable via
+Caddy on 443.
 
 ## Configuration (environment variables)
 
