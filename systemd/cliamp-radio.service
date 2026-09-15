@@ -1,0 +1,25 @@
+[Unit]
+Description=cliamp-radio web service
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/cliamp-radio/server
+ExecStart=/home/%i/.bun/bin/bun run index.ts
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+# Set these for real use — see README for how to generate ADMIN_PASSWORD_HASH.
+# Environment=ADMIN_USERNAME=admin
+# Environment=ADMIN_PASSWORD_HASH=...
+# Environment=JWT_SECRET=...
+# Environment=APP_VERSION=1.0.0
+# Environment=GITHUB_REPO=pbaekgaard/cliamp-radio
+
+# Allows the in-app "Install update" button to restart this service without a password prompt.
+# Add a matching sudoers rule, e.g.:
+#   %i ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart cliamp-radio
+
+[Install]
+WantedBy=multi-user.target
