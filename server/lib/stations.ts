@@ -78,7 +78,7 @@ function buildAllStation(stations: Station[]): Station {
     if (grouped.length === 0) continue; // nothing new from this station — skip its header too
     tracks.push(stationHeader(station.name), ...grouped);
   }
-  return { slug: ALL_STATION_SLUG, name: "All Stations", tracks, virtual: true };
+  return { slug: ALL_STATION_SLUG, name: "Master Station", tracks, virtual: true };
 }
 
 export async function listStations(): Promise<Station[]> {
