@@ -142,18 +142,31 @@ understands M3U.
 
 ## Deploying with systemd + auto-update
 
-1. Clone this repo on your server and set the env vars above (either via a
-   systemd `Environment=` line or an `EnvironmentFile=`).
-2. Copy `systemd/cliamp-radio.service` to `/etc/systemd/system/`, adjusting
-   the `User=`/paths, then `systemctl enable --now cliamp-radio`.
-3. Allow the service user to restart itself without a password so the
-   in-app "Install update" button works:
-   ```
-   youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart cliamp-radio
-   ```
-4. Tag and push a release (`git tag v1.0.1 && git push --tags`) — GitHub
-   Actions publishes a Release, and every running instance will pick it up
-   on its next poll and show the update prompt.
+One-time setup — from the repo directory on your server:
+
+```bash
+sudo ./scripts/install_systemd.sh          # infers the service user (or: ./scripts/install_systemd.sh someuser)
+```
+
+This builds the client, writes `/etc/systemd/system/cliamp-radio.service`
+(pointing at this exact checkout and your `bun` binary), grants the service
+user passwordless `sudo systemctl restart cliamp-radio` (so the in-app
+"Install update" button works without a prompt), then enables and starts the
+service. The unit file lives outside this git repo, so it's never touched or
+reset by `git pull` or an update — you only need to run this once.
+
+After that, set up HTTPS with [Caddy](#https-recommended-put-caddy-in-front)
+(see above), and optionally edit `/etc/systemd/system/cliamp-radio.service`
+to uncomment/set `JWT_SECRET` (then `sudo systemctl daemon-reload && sudo
+systemctl restart cliamp-radio`).
+
+To release an update: tag and push (`git tag v1.0.1 && git push --tags`) —
+GitHub Actions publishes a Release, and every running instance picks it up on
+its next poll and shows the update prompt in the UI.
+
+(`systemd/cliamp-radio.service` in this repo is kept as a reference/template
+if you'd rather wire up the unit by hand instead of using the installer
+script.)
 
 ## Releasing a new version
 
