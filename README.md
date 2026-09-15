@@ -144,7 +144,11 @@ A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other
 station's tracks with duplicates (matched by stream URL) removed. It's
 generated on the fly, shown read-only in the dashboard, and can't be edited,
-renamed, or deleted (the name "All" is reserved).
+renamed, or deleted (the name "All" is reserved). Each station's tracks are
+preceded by a `---- Station Name ----` divider entry (an inert placeholder
+track — technically "playable" but produces no audio) so you can tell where
+each station's tracks start while browsing/skipping through the combined
+playlist.
 
 ## Deploying with systemd + auto-update
 

@@ -17,6 +17,20 @@ export interface Station {
 
 export const ALL_STATION_SLUG = "all";
 
+// Non-playable placeholder used for the divider entries in the "All
+// Stations" playlist, so a header like "---- Chill Radio ----" shows up as
+// a real, clickable-but-inert list entry between each station's tracks.
+const HEADER_PLACEHOLDER_URL = "about:blank";
+
+function isHeaderTrack(track: Track): boolean {
+  return track.path === HEADER_PLACEHOLDER_URL;
+}
+
+function stationHeader(name: string): Track {
+  const bar = "-".repeat(16);
+  return { title: `${bar} ${name} ${bar}`, path: HEADER_PLACEHOLDER_URL };
+}
+
 export function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -48,11 +62,14 @@ function buildAllStation(stations: Station[]): Station {
   const seen = new Set<string>();
   const tracks: Track[] = [];
   for (const station of stations) {
+    const grouped: Track[] = [];
     for (const track of station.tracks) {
-      if (seen.has(track.path)) continue;
+      if (isHeaderTrack(track) || seen.has(track.path)) continue;
       seen.add(track.path);
-      tracks.push(track);
+      grouped.push(track);
     }
+    if (grouped.length === 0) continue; // nothing new from this station — skip its header too
+    tracks.push(stationHeader(station.name), ...grouped);
   }
   return { slug: ALL_STATION_SLUG, name: "All Stations", tracks, virtual: true };
 }
