@@ -32,6 +32,10 @@ export interface UpdateStatus {
   current: string;
   updateAvailable: boolean;
   latest: ReleaseInfo | null;
+  /** True if the live GitHub check failed (rate limit, network) and this
+   * result is a fallback (cached/stale or "unknown") rather than a fresh
+   * look at what's actually on GitHub right now. */
+  checkFailed?: boolean;
 }
 
 export interface CountryCount {

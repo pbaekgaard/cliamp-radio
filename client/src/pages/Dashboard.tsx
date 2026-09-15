@@ -26,6 +26,10 @@ export default function Dashboard() {
       setUpdateMessage("Couldn't reach GitHub to check for updates.");
     } else if (res.updateAvailable) {
       requestOpen();
+    } else if (res.checkFailed) {
+      setUpdateMessage(
+        "Couldn't reach GitHub right now (rate-limited or unreachable) — showing the last known result, which may be stale. Try again shortly."
+      );
     } else {
       setUpdateMessage(`You're up to date (${res.current}).`);
     }
