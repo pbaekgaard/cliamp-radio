@@ -15,7 +15,7 @@ export interface Station {
   virtual?: boolean;
 }
 
-export const ALL_STATION_SLUG = "all";
+export const ALL_STATION_SLUG = "master";
 
 // Non-playable placeholder used for the divider entries in the "All
 // Stations" playlist, so a header like "---- Chill Radio ----" shows up as
