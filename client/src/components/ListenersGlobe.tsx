@@ -99,6 +99,7 @@ function CanvasGlobe({ listeners }: { listeners: Listener[] }) {
     let cx = 0;
     let cy = 0;
     const rot: [number, number] = [-18, -14];
+    let centered = false;
     let dragging = false;
     let hovering = false;
     let last: [number, number] | null = null;
@@ -108,6 +109,26 @@ function CanvasGlobe({ listeners }: { listeners: Listener[] }) {
     let visible = true;
     let destroyed = false;
     let features: CountryFeature[] = [];
+
+    // The default rotation is an arbitrary starting angle — if a listener's
+    // dot happens to be on the far side of the globe from it, it'd be
+    // invisible until someone manually drags to find it. Once we know where
+    // listeners actually are, rotate to face their average position instead,
+    // once, so the very first render already shows them.
+    function centerOnListenersOnce() {
+      if (centered) return;
+      const rows = listenersRef.current;
+      if (rows.length === 0) return;
+      let sumLat = 0;
+      let sumLng = 0;
+      for (const l of rows) {
+        sumLat += l.lat;
+        sumLng += l.lng;
+      }
+      rot[0] = -(sumLng / rows.length);
+      rot[1] = -(sumLat / rows.length);
+      centered = true;
+    }
 
     function resize() {
       const rect = wrap!.getBoundingClientRect();
@@ -183,6 +204,7 @@ function CanvasGlobe({ listeners }: { listeners: Listener[] }) {
       if (now - lastDraw >= 33) {
         lastDraw = now;
         t += 0.033;
+        centerOnListenersOnce();
         if (!dragging && !hovering && !reduceMotion) rot[0] += 0.32;
         draw();
       }
@@ -310,9 +332,6 @@ function CanvasGlobe({ listeners }: { listeners: Listener[] }) {
       <canvas ref={canvasRef} className="globe-canvas" />
       <div className="globe-tip" ref={tipRef} />
       {mapError && <div className="globe-empty">map outlines unavailable — showing listener dots on a plain globe</div>}
-      <div className="globe-count">
-        {listeners.length} listener{listeners.length === 1 ? "" : "s"} tuned in right now
-      </div>
     </div>
   );
 }
@@ -326,10 +345,19 @@ export default function ListenersGlobe() {
 
   return (
     <div className="globe-page">
-      <ErrorBoundary fallback={<ListenersFallback listeners={listeners} />}>
-        <CanvasGlobe listeners={listeners} />
-      </ErrorBoundary>
+      <h1 className="globe-page-title">cliamp-radio</h1>
       <StationList />
+      <div className="globe-card">
+        <div className="globe-card-bar">
+          <span>LISTENERS</span>
+          <span className="muted">
+            {listeners.length} tuned in right now
+          </span>
+        </div>
+        <ErrorBoundary fallback={<ListenersFallback listeners={listeners} />}>
+          <CanvasGlobe listeners={listeners} />
+        </ErrorBoundary>
+      </div>
     </div>
   );
 }

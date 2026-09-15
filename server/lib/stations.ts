@@ -20,7 +20,14 @@ export const ALL_STATION_SLUG = "all";
 // Non-playable placeholder used for the divider entries in the "All
 // Stations" playlist, so a header like "---- Chill Radio ----" shows up as
 // a real, clickable-but-inert list entry between each station's tracks.
-const HEADER_PLACEHOLDER_URL = "about:blank";
+//
+// NOTE: this must be a URL a player will actually accept as a track entry.
+// "about:blank" looked right but isn't a real http(s) URL, so cliamp's M3U
+// parser was silently dropping those entries entirely instead of showing
+// them as dead tracks. ".invalid" is a TLD reserved by RFC 2606 to always
+// fail to resolve, so this looks like a normal stream URL to any parser but
+// is guaranteed to error out immediately if actually played.
+const HEADER_PLACEHOLDER_URL = "https://cliamp-radio.invalid/divider";
 
 function isHeaderTrack(track: Track): boolean {
   return track.path === HEADER_PLACEHOLDER_URL;

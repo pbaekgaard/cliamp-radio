@@ -25,16 +25,39 @@ body,
 
 /* --- Globe page --- */
 .globe-page {
-  min-height: 100vh;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+  width: 100%;
+}
+
+.globe-page-title {
+  margin-bottom: 8px;
+}
+
+.globe-card {
+  border: 1px solid rgba(124, 247, 196, 0.15);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+  margin-top: 32px;
+}
+
+.globe-card-bar {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(124, 247, 196, 0.12);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .globe-hero {
   position: relative;
   width: 100%;
-  height: 100vh;
-  overflow: hidden;
+  height: 360px;
 }
 
 .globe-canvas {
@@ -79,23 +102,8 @@ body,
   padding: 0 20px;
 }
 
-.globe-count {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  padding: 10px 16px;
-  background: rgba(16, 20, 31, 0.75);
-  border: 1px solid rgba(124, 247, 196, 0.3);
-  border-radius: 999px;
-  font-size: 14px;
-  backdrop-filter: blur(6px);
-}
-
-/* --- Station config list (below the globe) --- */
+/* --- Station config list --- */
 .station-config-list {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 40px 20px 64px;
   width: 100%;
 }
 

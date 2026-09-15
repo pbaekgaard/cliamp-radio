@@ -149,8 +149,10 @@ station's tracks with duplicates (matched by stream URL) removed. It's
 generated on the fly, shown read-only in the dashboard, and can't be edited,
 renamed, or deleted (the name "All" is reserved). Each station's tracks are
 preceded by a `---- Station Name ----` divider entry (an inert placeholder
-track — technically "playable" but produces no audio) so you can tell where
-each station's tracks start while browsing/skipping through the combined
+track pointing at `https://cliamp-radio.invalid/divider` — a real-looking
+stream URL on the `.invalid` TLD, which RFC 2606 guarantees will never
+resolve, so it "plays" but errors out immediately) so you can tell where each
+station's tracks start while browsing/skipping through the combined
 playlist.
 
 The public globe page (`/`) also lists every station with a **Copy config**

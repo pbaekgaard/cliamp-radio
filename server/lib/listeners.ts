@@ -11,7 +11,7 @@ interface Listen {
   timestamp: number;
 }
 
-const TTL_MS = 3 * 60 * 1000; // a listener is considered "active" for 3 minutes after their last request
+const TTL_MS = 10 * 60 * 1000; // a listener is considered "active" for 10 minutes after their last request
 const listens = new Map<string, Listen>();
 
 function normalizeIp(ip: string): string {
@@ -32,9 +32,12 @@ export function recordListen(rawIp: string, station: string, stationName: string
     city = geo.city || "Unknown";
     country = geo.country || "Unknown";
   } else {
-    // Private/local/unresolvable IP — jitter around null island so it still shows on the globe in dev.
-    lat = 0;
-    lng = 0;
+    // Private/local/unresolvable IP (e.g. testing from localhost, a LAN, or
+    // a VPN/CGNAT range geoip-lite has no data for) — scatter around null
+    // island a little so several such listeners don't render as one dot.
+    lat = (Math.random() - 0.5) * 8;
+    lng = (Math.random() - 0.5) * 8;
+    console.log(`[listeners] no geoip data for ${ip} — plotting near (0,0) as a fallback`);
   }
 
   listens.set(ip, {
@@ -47,6 +50,7 @@ export function recordListen(rawIp: string, station: string, stationName: string
     country,
     timestamp: Date.now(),
   });
+  console.log(`[listeners] recorded ${ip} -> ${station} (${city}, ${country} @ ${lat.toFixed(2)},${lng.toFixed(2)})`);
 }
 
 export function activeListens(): Omit<Listen, "ip">[] {
