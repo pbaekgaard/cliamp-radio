@@ -11,8 +11,7 @@ export default function UpdateBanner() {
   const [installLog, setInstallLog] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-  const [restartMessage, setRestartMessage] = useState<string | null>(null);
+  const [restartCountdown, setRestartCountdown] = useState<number | null>(null);
 
   // Re-show the pill if a newer release shows up after the user dismissed
   // a previous one.
@@ -29,43 +28,20 @@ export default function UpdateBanner() {
     }
   }, [openRequestId]);
 
-  // Once the update script has restarted the service, poll until it's back
-  // up and then reload the page automatically so the user always ends up on
-  // the new version without having to refresh by hand.
+  // A simple fixed countdown after a successful install, rather than
+  // polling for the service to come back — the server schedules its own
+  // restart shortly after responding, so by the time a short countdown
+  // elapses it's reliably back up, without the false starts that come from
+  // trying to detect "down, then up" through a reverse proxy.
   useEffect(() => {
-    if (!restarting) return;
-    let cancelled = false;
-    let sawDown = false;
-    let attempts = 0;
-    setRestartMessage("Waiting for the service to come back online…");
-    const id = setInterval(async () => {
-      if (cancelled) return;
-      attempts += 1;
-      try {
-        await api.version();
-        if (sawDown) {
-          cancelled = true;
-          clearInterval(id);
-          setRestartMessage("Back online — reloading…");
-          window.location.reload();
-          return;
-        }
-      } catch {
-        sawDown = true;
-      }
-      if (attempts > 60) {
-        // ~2 minutes without the service coming back — stop polling and let
-        // the user refresh manually rather than looping forever.
-        cancelled = true;
-        clearInterval(id);
-        setRestartMessage("Still waiting on the service to restart — try refreshing manually.");
-      }
-    }, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [restarting]);
+    if (restartCountdown === null) return;
+    if (restartCountdown <= 0) {
+      window.location.reload();
+      return;
+    }
+    const id = setTimeout(() => setRestartCountdown((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [restartCountdown]);
 
   if (!status?.updateAvailable || dismissed || !username) return null;
 
@@ -76,8 +52,8 @@ export default function UpdateBanner() {
     try {
       const res = await api.updateInstall();
       if (res.ok) {
-        setInstallLog(`${res.log}\n==> Service is restarting now — this page will go offline for a few seconds.`);
-        setRestarting(true);
+        setInstallLog(`${res.log}\n==> Service is restarting now — this page will reload automatically.`);
+        setRestartCountdown(3);
       } else {
         setInstallLog(res.log);
         setInstallError("Update script failed — see output below.");
@@ -90,6 +66,8 @@ export default function UpdateBanner() {
       setInstalling(false);
     }
   }
+
+  const restarting = restartCountdown !== null;
 
   return (
     <>
@@ -106,7 +84,9 @@ export default function UpdateBanner() {
             <pre className="release-body">{status.latest?.body}</pre>
             {installError && <p className="error">{installError}</p>}
             {installLog && <pre className="install-log">{installLog}</pre>}
-            {restarting && <p className="muted restart-message">{restartMessage}</p>}
+            {restarting && (
+              <p className="muted restart-message">Reloading in {restartCountdown}…</p>
+            )}
             <div className="modal-actions">
               <button
                 className="btn-secondary"
