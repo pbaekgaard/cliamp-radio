@@ -105,6 +105,7 @@ export const api = {
   stats: () => request<StatsResponse>("/api/stats"),
 
   updateCheck: () => request<UpdateStatus>("/api/update/check"),
+  version: () => request<{ version: string }>("/api/version"),
   // Deliberately doesn't use request(): we want the log/output even when the
   // update script fails (non-2xx), instead of throwing it away.
   updateInstall: async (): Promise<{ ok: boolean; log: string }> => {

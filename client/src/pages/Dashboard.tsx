@@ -8,7 +8,7 @@ const emptyDraft = (): { name: string; tracks: Track[] } => ({ name: "", tracks:
 
 export default function Dashboard() {
   const { username, logout } = useAuth();
-  const { checking, checkNow } = useUpdate();
+  const { checking, checkNow, requestOpen } = useUpdate();
   const [stations, setStations] = useState<Station[]>([]);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draft, setDraft] = useState(emptyDraft());
@@ -25,7 +25,7 @@ export default function Dashboard() {
     if (!res) {
       setUpdateMessage("Couldn't reach GitHub to check for updates.");
     } else if (res.updateAvailable) {
-      setUpdateMessage(`Update available: ${res.current} → ${res.latest?.tagName} — see the notification button.`);
+      requestOpen();
     } else {
       setUpdateMessage(`You're up to date (${res.current}).`);
     }

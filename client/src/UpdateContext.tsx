@@ -7,6 +7,9 @@ interface UpdateContextValue {
   lastChecked: Date | null;
   /** Runs an update check immediately, regardless of the background poll timer. */
   checkNow: () => Promise<UpdateStatus | null>;
+  /** Bumped whenever something wants the update modal to pop open (e.g. "Check for updates" finding one). */
+  openRequestId: number;
+  requestOpen: () => void;
 }
 
 const UpdateContext = createContext<UpdateContextValue | null>(null);
@@ -17,7 +20,10 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [openRequestId, setOpenRequestId] = useState(0);
   const checkingRef = useRef(false);
+
+  const requestOpen = useCallback(() => setOpenRequestId((n) => n + 1), []);
 
   const checkNow = useCallback(async () => {
     if (checkingRef.current) return status;
@@ -45,7 +51,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   }, [checkNow]);
 
   return (
-    <UpdateContext.Provider value={{ status, checking, lastChecked, checkNow }}>
+    <UpdateContext.Provider value={{ status, checking, lastChecked, checkNow, openRequestId, requestOpen }}>
       {children}
     </UpdateContext.Provider>
   );

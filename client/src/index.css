@@ -440,6 +440,11 @@ body,
   font-size: 14px;
 }
 
+.restart-message {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
 .muted {
   color: var(--muted);
   font-size: 13px;
