@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
+import ChangePasswordModal from "./components/ChangePasswordModal";
 import ListenersGlobe from "./components/ListenersGlobe";
 import NavCorner from "./components/NavCorner";
 import UpdateBanner from "./components/UpdateBanner";
@@ -14,10 +15,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
+  const { username, mustChangePassword } = useAuth();
+
   return (
     <>
       <NavCorner />
       <UpdateBanner />
+      {username && mustChangePassword && <ChangePasswordModal />}
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />

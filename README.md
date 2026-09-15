@@ -96,25 +96,42 @@ Caddy needs 80 briefly for the ACME HTTP challenge (then redirects to 443),
 so both ports must be open even though the app itself is only reachable via
 Caddy on 443.
 
+## Admin login & password
+
+The first time the server runs, it creates `server/data/admin-credentials.json`
+(gitignored — never touched by `git pull`/updates) with username `admin` and
+password `changeme`. Logging in with that default password immediately shows
+a mandatory "set a new password" prompt — you can't use the dashboard until
+you change it. From then on your chosen password is what's stored in that
+file and persists across every future update/restart.
+
+`ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH` env vars are only consulted on the
+very first boot (before that file exists), to let you provision a non-default
+password/username up front instead of using `changeme`. Once the credentials
+file exists, those env vars are ignored — the file is the source of truth.
+
 ## Configuration (environment variables)
 
 | Variable              | Purpose                                                   | Default          |
 | --------------------- | ---------------------------------------------------------- | ----------------- |
 | `PORT`                | HTTP port                                                  | `8000`            |
-| `ADMIN_USERNAME`      | Dashboard login username                                   | `admin`           |
-| `ADMIN_PASSWORD_HASH` | bcrypt hash of the admin password                          | hash of `changeme`|
+| `ADMIN_USERNAME`      | Initial admin username (first boot only — see above)      | `admin`           |
+| `ADMIN_PASSWORD_HASH` | bcrypt hash for the initial admin password (first boot only) | hash of `changeme`, forces a password change on first login |
 | `JWT_SECRET`          | Secret used to sign session cookies                        | dev default — **change this** |
 | `APP_VERSION`         | Version this deployment reports as "current"               | `0.0.0`           |
 | `GITHUB_REPO`         | `owner/repo` to check for releases                         | `pbaekgaard/cliamp-radio` |
 
-Generate a password hash:
+Generate a password hash (only needed if you want to skip the forced
+first-login password change):
 
 ```bash
 cd server && bun -e "console.log(require('bcryptjs').hashSync('your-password', 10))"
 ```
 
-**Change `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `JWT_SECRET` before
-exposing this to the internet** — the defaults are for local development only.
+**Change `JWT_SECRET` before exposing this to the internet** — the dev
+default is not safe for production. The admin password is handled by the
+forced first-login change described above, so there's nothing else to
+rotate manually.
 
 ## Adding stations
 

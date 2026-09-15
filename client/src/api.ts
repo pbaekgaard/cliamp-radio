@@ -48,12 +48,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   login: (username: string, password: string) =>
-    request<{ username: string }>("/api/auth/login", {
+    request<{ username: string; mustChangePassword: boolean }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request("/api/auth/logout", { method: "POST" }),
-  me: () => request<{ username: string }>("/api/auth/me"),
+  me: () => request<{ username: string; mustChangePassword: boolean }>("/api/auth/me"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: true }>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
 
   listStations: () => request<Station[]>("/api/stations"),
   createStation: (station: Omit<Station, "slug">) =>

@@ -1,6 +1,8 @@
 import path from "node:path";
 import {
+  changePassword,
   createSessionToken,
+  getMustChangePassword,
   requireAuth,
   SESSION_COOKIE,
   verifyCredentials,
@@ -68,12 +70,12 @@ const server = Bun.serve({
       if (!body?.username || !body?.password) {
         return json({ error: "username and password required" }, { status: 400 });
       }
-      const valid = await verifyCredentials(body.username, body.password);
-      if (!valid) return json({ error: "invalid credentials" }, { status: 401 });
+      const result = await verifyCredentials(body.username, body.password);
+      if (!result.ok) return json({ error: "invalid credentials" }, { status: 401 });
 
       const token = createSessionToken(body.username);
       return json(
-        { username: body.username },
+        { username: body.username, mustChangePassword: result.mustChangePassword },
         {
           headers: {
             "Set-Cookie": `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax`,
@@ -92,7 +94,20 @@ const server = Bun.serve({
     if (pathname === "/api/auth/me" && req.method === "GET") {
       const user = requireAuth(req);
       if (!user) return unauthorized();
-      return json({ username: user.sub });
+      const mustChangePassword = await getMustChangePassword(user.sub);
+      return json({ username: user.sub, mustChangePassword });
+    }
+
+    if (pathname === "/api/auth/change-password" && req.method === "POST") {
+      const user = requireAuth(req);
+      if (!user) return unauthorized();
+      const body = await req.json().catch(() => null);
+      if (!body?.currentPassword || !body?.newPassword) {
+        return json({ error: "currentPassword and newPassword required" }, { status: 400 });
+      }
+      const result = await changePassword(user.sub, body.currentPassword, body.newPassword);
+      if (!result.ok) return json({ error: result.error }, { status: 400 });
+      return json({ ok: true });
     }
 
     // --- Stations CRUD ---

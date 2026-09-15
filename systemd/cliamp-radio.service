@@ -12,7 +12,9 @@ RestartSec=5
 Environment=NODE_ENV=production
 # The app listens on 8000 by default; put Caddy (or another reverse proxy) in
 # front of it on 80/443 for TLS — see deploy/Caddyfile and the README.
-# Set these for real use — see README for how to generate ADMIN_PASSWORD_HASH.
+# ADMIN_USERNAME/ADMIN_PASSWORD_HASH are only consulted on first boot, before
+# server/data/admin-credentials.json exists (see README) — usually you can
+# leave these unset and just use the forced "changeme" -> new password flow.
 # Environment=ADMIN_USERNAME=admin
 # Environment=ADMIN_PASSWORD_HASH=...
 # Environment=JWT_SECRET=...
