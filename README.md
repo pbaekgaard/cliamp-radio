@@ -158,7 +158,18 @@ playlist.
 The public globe page (`/`) also lists every station with a **Copy config**
 button next to it — it copies a ready-to-paste `[[station]]` block (with the
 right `name`/`url` for your own deployment's hostname) straight into your
-cliamp `radios.toml`.
+cliamp `radios.toml`. A **Copy all** button above the list copies every
+station's block at once, for a one-shot `radios.toml` setup.
+
+Below the station list, a live globe shows current listeners as dots
+(canvas + d3-geo, see above), and a stats panel next to it shows the top
+countries listening right now (falling back to all-time top countries when
+nobody's currently tuned in), the busiest station, peak concurrent listeners,
+total sessions, total hours streamed, and a bar chart of listening hours for
+the last 31 days. All of this is computed live on the server from each
+listener's playlist requests — see `server/lib/listeners.ts` — and persisted
+to `server/data/listen-history.jsonl` (git-ignored) so the all-time numbers
+survive restarts/updates.
 
 ## Deploying with systemd + auto-update
 

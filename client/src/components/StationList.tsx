@@ -7,6 +7,10 @@ function buildConfig(station: Station): string {
   return `[[station]]\nname = "${host} — ${station.name}"\nurl = "${origin}/cliamp-radio/${station.slug}.m3u"\n`;
 }
 
+function buildAllConfigs(stations: Station[]): string {
+  return stations.map(buildConfig).join("\n");
+}
+
 function legacyCopy(text: string) {
   const ta = document.createElement("textarea");
   ta.value = text;
@@ -26,31 +30,48 @@ function legacyCopy(text: string) {
 export default function StationList() {
   const [stations, setStations] = useState<Station[]>([]);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   useEffect(() => {
     api.listStations().then(setStations).catch(() => {});
   }, []);
 
-  async function copy(station: Station) {
-    const text = buildConfig(station);
+  async function copyText(text: string) {
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
       else legacyCopy(text);
     } catch {
       legacyCopy(text);
     }
+  }
+
+  async function copy(station: Station) {
+    await copyText(buildConfig(station));
     setCopiedSlug(station.slug);
     setTimeout(() => setCopiedSlug((s) => (s === station.slug ? null : s)), 1600);
+  }
+
+  async function copyAll() {
+    await copyText(buildAllConfigs(stations));
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 1600);
   }
 
   if (!stations.length) return null;
 
   return (
     <div className="station-config-list">
-      <h2>Stations</h2>
-      <p className="muted">
-        Copy a station's <code>[[station]]</code> block straight into your cliamp <code>radios.toml</code>.
-      </p>
+      <div className="station-config-header">
+        <div>
+          <h2>Stations</h2>
+          <p className="muted">
+            Copy a station's <code>[[station]]</code> block straight into your cliamp <code>radios.toml</code>.
+          </p>
+        </div>
+        <button className="btn-secondary" onClick={copyAll}>
+          {copiedAll ? "Copied ✓" : `Copy all (${stations.length})`}
+        </button>
+      </div>
       <div className="station-config-items">
         {stations.map((s) => (
           <div className="station-config-item" key={s.slug}>

@@ -34,6 +34,39 @@ export interface UpdateStatus {
   latest: ReleaseInfo | null;
 }
 
+export interface CountryCount {
+  code: string;
+  name: string;
+  count: number;
+}
+
+export interface StationCount {
+  slug: string;
+  name: string;
+  count: number;
+}
+
+export interface LiveStats {
+  listeners: number;
+  countries: number;
+  topCountries: CountryCount[];
+  busiestStation: StationCount | null;
+}
+
+export interface AllTimeStats {
+  totalSessions: number;
+  totalListenHours: number;
+  peakListeners: number;
+  topCountries: CountryCount[];
+  busiestStation: StationCount | null;
+  daily: Array<{ date: string; hours: number }>;
+}
+
+export interface StatsResponse {
+  live: LiveStats;
+  allTime: AllTimeStats;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -69,6 +102,7 @@ export const api = {
   deleteStation: (slug: string) => request(`/api/stations/${slug}`, { method: "DELETE" }),
 
   listeners: () => request<Listener[]>("/api/listeners"),
+  stats: () => request<StatsResponse>("/api/stats"),
 
   updateCheck: () => request<UpdateStatus>("/api/update/check"),
   // Deliberately doesn't use request(): we want the log/output even when the

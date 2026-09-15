@@ -7,7 +7,7 @@ import {
   SESSION_COOKIE,
   verifyCredentials,
 } from "./lib/auth";
-import { activeListens, recordListen } from "./lib/listeners";
+import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
   deleteStation,
@@ -165,6 +165,11 @@ const server = Bun.serve({
     // --- Listeners (for the globe) ---
     if (pathname === "/api/listeners" && req.method === "GET") {
       return json(activeListens());
+    }
+
+    // --- Stats (top countries, listening hours, busiest station, etc.) ---
+    if (pathname === "/api/stats" && req.method === "GET") {
+      return json({ live: getLiveStats(), allTime: getAllTimeStats() });
     }
 
     // --- Update checker ---

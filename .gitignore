@@ -4,3 +4,4 @@ client/dist/
 .env
 .DS_Store
 server/data/admin-credentials.json
+server/data/listen-history.jsonl

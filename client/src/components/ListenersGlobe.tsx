@@ -6,6 +6,7 @@ import { api, type Listener } from "../api";
 import ErrorBoundary from "./ErrorBoundary";
 import ListenersFallback from "./ListenersFallback";
 import StationList from "./StationList";
+import StatsPanel from "./StatsPanel";
 
 // Plain 2D canvas + d3-geo orthographic projection — no WebGL, so there's no
 // GPU/driver context to lose and crash the page (see git history for the
@@ -342,21 +343,25 @@ function graticuleObj(): GeoPermissibleObjects {
 
 export default function ListenersGlobe() {
   const listeners = useListeners();
+  const live = listeners.length > 0;
 
   return (
     <div className="globe-page">
       <h1 className="globe-page-title">cliamp-radio</h1>
       <StationList />
-      <div className="globe-card">
-        <div className="globe-card-bar">
-          <span>LISTENERS</span>
-          <span className="muted">
-            {listeners.length} tuned in right now
-          </span>
+      <div className="stats-grid">
+        <div className="globe-card">
+          <div className="globe-card-bar">
+            <span>
+              <span className={`live-dot${live ? "" : " idle"}`} />
+              {live ? `${listeners.length} tuned in right now` : "quiet right now"}
+            </span>
+          </div>
+          <ErrorBoundary fallback={<ListenersFallback listeners={listeners} />}>
+            <CanvasGlobe listeners={listeners} />
+          </ErrorBoundary>
         </div>
-        <ErrorBoundary fallback={<ListenersFallback listeners={listeners} />}>
-          <CanvasGlobe listeners={listeners} />
-        </ErrorBoundary>
+        <StatsPanel />
       </div>
     </div>
   );
