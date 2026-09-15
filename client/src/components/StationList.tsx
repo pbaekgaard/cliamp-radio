@@ -31,9 +31,31 @@ export default function StationList() {
   const [stations, setStations] = useState<Station[]>([]);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     api.listStations().then(setStations).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const listeners = await api.listeners();
+        if (cancelled) return;
+        const next: Record<string, number> = {};
+        for (const l of listeners) next[l.station] = (next[l.station] || 0) + 1;
+        setCounts(next);
+      } catch {
+        // ignore transient network errors
+      }
+    }
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   async function copyText(text: string) {
@@ -73,20 +95,27 @@ export default function StationList() {
         </button>
       </div>
       <div className="station-config-items">
-        {stations.map((s) => (
-          <div className="station-config-item" key={s.slug}>
-            <div>
-              <div className="station-config-name">
-                {s.name}
-                {s.virtual && <span className="badge">auto-generated</span>}
+        {stations.map((s) => {
+          const n = counts[s.slug] || 0;
+          return (
+            <div className="station-config-item" key={s.slug}>
+              <div>
+                <div className="station-config-name">
+                  {s.name}
+                  {s.virtual && <span className="badge">auto-generated</span>}
+                  <span className={`station-listener-count${n > 0 ? " live" : ""}`}>
+                    <span className={`live-dot${n > 0 ? "" : " idle"}`} />
+                    {n} listening
+                  </span>
+                </div>
+                <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
               </div>
-              <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
+              <button className="btn-secondary" onClick={() => copy(s)}>
+                {copiedSlug === s.slug ? "Copied ✓" : "Copy config"}
+              </button>
             </div>
-            <button className="btn-secondary" onClick={() => copy(s)}>
-              {copiedSlug === s.slug ? "Copied ✓" : "Copy config"}
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
