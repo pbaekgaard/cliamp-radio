@@ -74,6 +74,14 @@ body,
   font-size: 14px;
 }
 
+/* --- Nav corner (login/dashboard link) --- */
+.nav-corner {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 40;
+}
+
 /* --- Update pill / modal --- */
 .update-pill {
   position: fixed;

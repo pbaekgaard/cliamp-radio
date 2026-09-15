@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import ListenersGlobe from "./components/ListenersGlobe";
+import NavCorner from "./components/NavCorner";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
@@ -15,6 +16,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AppRoutes() {
   return (
     <>
+      <NavCorner />
       <UpdateBanner />
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />

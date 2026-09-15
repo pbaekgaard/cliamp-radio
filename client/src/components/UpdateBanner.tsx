@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, type UpdateStatus } from "../api";
+import { useAuth } from "../AuthContext";
 
 export default function UpdateBanner() {
+  const { username } = useAuth();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installLog, setInstallLog] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -26,16 +29,17 @@ export default function UpdateBanner() {
     };
   }, []);
 
-  if (!status?.updateAvailable || dismissed) return null;
+  if (!status?.updateAvailable || dismissed || !username) return null;
 
   async function install() {
     setInstalling(true);
     setInstallLog(null);
+    setInstallError(null);
     try {
       const res = await api.updateInstall();
       setInstallLog(res.log);
     } catch (err) {
-      setInstallLog(err instanceof Error ? err.message : String(err));
+      setInstallError(err instanceof Error ? err.message : String(err));
     } finally {
       setInstalling(false);
     }
@@ -54,6 +58,7 @@ export default function UpdateBanner() {
               {status.current} → {status.latest?.tagName}
             </p>
             <pre className="release-body">{status.latest?.body}</pre>
+            {installError && <p className="error">{installError}</p>}
             {installLog && <pre className="install-log">{installLog}</pre>}
             <div className="modal-actions">
               <button
