@@ -44,21 +44,82 @@ export function getCurrentVersion(): string {
   return cachedVersion;
 }
 
+async function ghJson(url: string): Promise<any | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "cliamp-radio-updater" },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function parseVersion(tag: string): [number, number, number] | null {
+  const m = tag.match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function compareVersions(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i]! !== b[i]!) return a[i]! - b[i]!;
+  }
+  return 0;
+}
+
+// We check plain git tags rather than GitHub "Releases" — releases are a
+// separate object that has to be explicitly published (e.g. via `gh release
+// create`), and it's easy to push a tag and forget that extra step, which
+// would silently leave update-checking stuck on an old version forever.
+// Tags are pushed as a normal part of `git push --tags`, so this is always
+// in sync with what's actually on GitHub.
+async function fetchLatestTag(): Promise<{ name: string; sha: string } | null> {
+  const tags = await ghJson(`https://api.github.com/repos/${REPO}/tags?per_page=100`);
+  if (!Array.isArray(tags) || tags.length === 0) return null;
+  let best: { name: string; sha: string; v: [number, number, number] } | null = null;
+  for (const t of tags) {
+    const v = parseVersion(t.name);
+    if (!v || !t.commit?.sha) continue;
+    if (!best || compareVersions(v, best.v) > 0) best = { name: t.name, sha: t.commit.sha, v };
+  }
+  return best ? { name: best.name, sha: best.sha } : null;
+}
+
 async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
   const now = Date.now();
   if (cachedRelease && now - cachedAt < CACHE_MS) return cachedRelease;
 
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": "cliamp-radio-updater" },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
+  const tag = await fetchLatestTag();
+  if (!tag) return null;
+
+  // Annotated tags (`git tag -a`, which is how these are cut) carry a
+  // message we can show as release notes; fall back to the commit message
+  // for a plain/lightweight tag.
+  let body = "";
+  let publishedAt = new Date().toISOString();
+  const ref = await ghJson(`https://api.github.com/repos/${REPO}/git/refs/tags/${tag.name}`);
+  if (ref?.object?.type === "tag" && ref.object.sha) {
+    const tagObj = await ghJson(`https://api.github.com/repos/${REPO}/git/tags/${ref.object.sha}`);
+    if (tagObj) {
+      body = tagObj.message || "";
+      publishedAt = tagObj.tagger?.date || publishedAt;
+    }
+  } else {
+    const commit = await ghJson(`https://api.github.com/repos/${REPO}/commits/${tag.sha}`);
+    if (commit) {
+      body = commit.commit?.message || "";
+      publishedAt = commit.commit?.committer?.date || publishedAt;
+    }
+  }
+
   cachedRelease = {
-    tagName: data.tag_name,
-    name: data.name || data.tag_name,
-    body: data.body || "",
-    htmlUrl: data.html_url,
-    publishedAt: data.published_at,
+    tagName: tag.name,
+    name: tag.name,
+    body,
+    htmlUrl: `https://github.com/${REPO}/releases/tag/${tag.name}`,
+    publishedAt,
   };
   cachedAt = now;
   return cachedRelease;
