@@ -353,18 +353,55 @@ body,
   font-size: 14px;
 }
 
-/* --- Nav corner (login/dashboard link) --- */
-.nav-corner {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
+/* --- Top bar (brand + login/dashboard link) --- */
+.topbar {
+  position: sticky;
+  top: 0;
   z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  background: rgba(5, 7, 13, 0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(124, 247, 196, 0.15);
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.topbar-logo {
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.topbar-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.topbar-brand-name {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+
+.topbar-brand-by {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* --- Update pill / modal --- */
 .update-pill {
   position: fixed;
-  top: 20px;
+  top: 76px;
   right: 20px;
   z-index: 50;
   background: var(--accent);

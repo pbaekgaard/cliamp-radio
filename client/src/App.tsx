@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import { UpdateProvider } from "./UpdateContext";
 import ChangePasswordModal from "./components/ChangePasswordModal";
 import ListenersGlobe from "./components/ListenersGlobe";
-import NavCorner from "./components/NavCorner";
+import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
@@ -20,7 +20,7 @@ function AppRoutes() {
 
   return (
     <>
-      <NavCorner />
+      <TopBar />
       <UpdateBanner />
       {username && mustChangePassword && <ChangePasswordModal />}
       <Routes>

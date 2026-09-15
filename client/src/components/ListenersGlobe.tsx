@@ -347,7 +347,6 @@ export default function ListenersGlobe() {
 
   return (
     <div className="globe-page">
-      <h1 className="globe-page-title">Cliamp Radio</h1>
       <p className="globe-page-subtitle">Self-hosted internet radio, live from baekgaard.dev</p>
       <StationList />
       <div className="stats-grid">
