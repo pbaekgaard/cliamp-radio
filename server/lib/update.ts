@@ -57,7 +57,13 @@ export async function checkForUpdate() {
 export function runUpdate(): Promise<{ ok: boolean; log: string }> {
   return new Promise((resolve) => {
     const script = path.join(REPO_ROOT, "scripts", "update.sh");
-    const child = spawn("bash", [script], { cwd: REPO_ROOT });
+    // SKIP_RESTART=1: the script must NOT restart the service itself — that
+    // would kill this very process before it can respond to the HTTP
+    // request that triggered it. We restart separately, after responding.
+    const child = spawn("bash", [script], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, SKIP_RESTART: "1" },
+    });
     let log = "";
     child.stdout.on("data", (d) => (log += d.toString()));
     child.stderr.on("data", (d) => (log += d.toString()));
@@ -66,4 +72,19 @@ export function runUpdate(): Promise<{ ok: boolean; log: string }> {
       resolve({ ok: code === 0, log });
     });
   });
+}
+
+/**
+ * Restarts the systemd service (if active) a moment after the caller has
+ * finished writing the HTTP response, so the client actually receives the
+ * update result before this process is killed by the restart.
+ */
+export function scheduleServiceRestart(delayMs = 750): void {
+  setTimeout(() => {
+    const child = spawn("bash", [
+      "-c",
+      "command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet cliamp-radio && sudo systemctl restart cliamp-radio || true",
+    ]);
+    child.unref();
+  }, delayMs).unref();
 }

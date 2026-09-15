@@ -8,7 +8,7 @@ import {
   verifyCredentials,
 } from "./lib/auth";
 import { activeListens, recordListen } from "./lib/listeners";
-import { checkForUpdate, getCurrentVersion, runUpdate } from "./lib/update";
+import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
   deleteStation,
   getStation,
@@ -162,6 +162,9 @@ const server = Bun.serve({
     if (pathname === "/api/update/install" && req.method === "POST") {
       if (!requireAuth(req)) return unauthorized();
       const result = await runUpdate();
+      // Restart (if applicable) only after this response has been handed
+      // off, so the client actually sees the result instead of a 502.
+      if (result.ok) scheduleServiceRestart();
       return json(result, { status: result.ok ? 200 : 500 });
     }
 

@@ -37,8 +37,12 @@ export default function UpdateBanner() {
     setInstallError(null);
     try {
       const res = await api.updateInstall();
-      setInstallLog(res.log);
-      if (!res.ok) setInstallError("Update script failed — see output below.");
+      if (res.ok) {
+        setInstallLog(`${res.log}\n==> Service is restarting now — this page will go offline for a few seconds.`);
+      } else {
+        setInstallLog(res.log);
+        setInstallError("Update script failed — see output below.");
+      }
     } catch (err) {
       // Only reaches here on a real network failure (fetch itself rejected);
       // api.updateInstall() otherwise always resolves with { ok, log }.

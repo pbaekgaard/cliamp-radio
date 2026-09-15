@@ -31,7 +31,16 @@ echo "==> Installing server dependencies"
 echo "==> Installing and building client"
 (cd client && bun install --frozen-lockfile && bun run build)
 
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet cliamp-radio 2>/dev/null; then
+# NOTE: we deliberately do NOT restart the service here. This script is run
+# by the very server process it would be restarting (spawned from the web
+# UI's "Install update" button), so killing it now would drop the HTTP
+# connection before the client ever sees the result (a 502 with no body).
+# The server schedules the actual restart itself, a moment after it has
+# finished sending this script's log back to the client. See
+# server/lib/update.ts / the SKIP_RESTART env var below.
+if [ "${SKIP_RESTART:-}" = "1" ]; then
+  echo "==> Skipping restart here; the server will restart itself after responding to the request."
+elif command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet cliamp-radio 2>/dev/null; then
   echo "==> Restarting cliamp-radio systemd service"
   sudo systemctl restart cliamp-radio
 else
