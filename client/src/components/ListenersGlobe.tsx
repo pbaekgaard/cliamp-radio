@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import GlobeGL from "react-globe.gl";
 import { api, type Listener } from "../api";
+import ErrorBoundary from "./ErrorBoundary";
+import ListenersFallback from "./ListenersFallback";
+import { isWebGLAvailable } from "../webgl";
 
-export default function ListenersGlobe() {
+function useListeners() {
   const [listeners, setListeners] = useState<Listener[]>([]);
-  const globeRef = useRef<{ pointOfView: (v: object, ms?: number) => void } | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,6 +25,12 @@ export default function ListenersGlobe() {
       clearInterval(id);
     };
   }, []);
+
+  return listeners;
+}
+
+function Globe3D({ listeners }: { listeners: Listener[] }) {
+  const globeRef = useRef<{ pointOfView: (v: object, ms?: number) => void } | undefined>(undefined);
 
   useEffect(() => {
     globeRef.current?.pointOfView({ lat: 20, lng: 0, altitude: 2.2 }, 0);
@@ -58,5 +66,18 @@ export default function ListenersGlobe() {
         {listeners.length} listener{listeners.length === 1 ? "" : "s"} tuned in right now
       </div>
     </div>
+  );
+}
+
+export default function ListenersGlobe() {
+  const listeners = useListeners();
+  const [webglOk] = useState(isWebGLAvailable);
+
+  if (!webglOk) return <ListenersFallback listeners={listeners} />;
+
+  return (
+    <ErrorBoundary fallback={<ListenersFallback listeners={listeners} />}>
+      <Globe3D listeners={listeners} />
+    </ErrorBoundary>
   );
 }
