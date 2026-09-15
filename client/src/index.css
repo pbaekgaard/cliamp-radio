@@ -24,11 +24,59 @@ body,
 }
 
 /* --- Globe page --- */
-.globe-wrap {
+.globe-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.globe-hero {
   position: relative;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
   overflow: hidden;
+}
+
+.globe-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+.globe-canvas.drag {
+  cursor: grabbing;
+}
+
+.globe-tip {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0;
+  left: 0;
+  top: 0;
+  font-size: 12px;
+  background: var(--accent);
+  color: #05070d;
+  padding: 6px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transform: translate(-50%, -150%);
+  transition: opacity 0.12s;
+  z-index: 50;
+}
+
+.globe-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  padding: 0 20px;
 }
 
 .globe-count {
@@ -43,12 +91,44 @@ body,
   backdrop-filter: blur(6px);
 }
 
-.globe-tooltip {
-  color: #05070d;
-  background: #7cf7c4;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+/* --- Station config list (below the globe) --- */
+.station-config-list {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+  width: 100%;
+}
+
+.station-config-list h2 {
+  margin-bottom: 4px;
+}
+
+.station-config-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.station-config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.station-config-name {
+  font-weight: 600;
+}
+
+.station-config-url {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* --- Listener fallback (no WebGL) --- */

@@ -5,8 +5,7 @@ export default function ListenersFallback({ listeners }: { listeners: Listener[]
     <div className="listeners-fallback">
       <h1>cliamp-radio</h1>
       <p className="muted">
-        3D globe unavailable (WebGL isn't supported in this browser/session) — showing listeners
-        as a list instead.
+        Live globe unavailable right now — showing listeners as a list instead.
       </p>
       <div className="globe-count" style={{ position: "static", display: "inline-block", marginBottom: 16 }}>
         {listeners.length} listener{listeners.length === 1 ? "" : "s"} tuned in right now

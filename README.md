@@ -9,8 +9,11 @@ live globe of who's listening right now.
 - **Server**: [Bun](https://bun.sh) + TypeScript, no framework — just
   `Bun.serve`. Serves the station M3U endpoints, a JSON API, and the built
   React client.
-- **Client**: React + Vite, [`react-globe.gl`](https://github.com/vasturiano/react-globe.gl)
-  for the listener globe.
+- **Client**: React + Vite. The listener globe is a plain 2D `<canvas>`
+  rendered with a [`d3-geo`](https://github.com/d3/d3-geo) orthographic
+  projection over a bundled [world-atlas](https://github.com/topojson/world-atlas)
+  topojson (no WebGL/Three.js, no third-party CDN at runtime — inspired by
+  [cliamp.stream](https://github.com/bjarneo/cliamp)'s own globe).
 - **Auth**: single admin account (env-configured username + bcrypt password
   hash), JWT session cookie.
 - **Listener geolocation**: [`geoip-lite`](https://github.com/geoip-lite/node-geoip)
@@ -149,6 +152,11 @@ preceded by a `---- Station Name ----` divider entry (an inert placeholder
 track — technically "playable" but produces no audio) so you can tell where
 each station's tracks start while browsing/skipping through the combined
 playlist.
+
+The public globe page (`/`) also lists every station with a **Copy config**
+button next to it — it copies a ready-to-paste `[[station]]` block (with the
+right `name`/`url` for your own deployment's hostname) straight into your
+cliamp `radios.toml`.
 
 ## Deploying with systemd + auto-update
 
