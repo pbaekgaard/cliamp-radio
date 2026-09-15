@@ -1,33 +1,22 @@
 import { useEffect, useState } from "react";
-import { api, type UpdateStatus } from "../api";
+import { api } from "../api";
 import { useAuth } from "../AuthContext";
+import { useUpdate } from "../UpdateContext";
 
 export default function UpdateBanner() {
   const { username } = useAuth();
-  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const { status } = useUpdate();
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installLog, setInstallLog] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
+  // Re-show the pill if a newer release shows up after the user dismissed
+  // a previous one.
   useEffect(() => {
-    let cancelled = false;
-    async function poll() {
-      try {
-        const res = await api.updateCheck();
-        if (!cancelled) setStatus(res);
-      } catch {
-        // ignore — GitHub may be unreachable or no releases exist yet
-      }
-    }
-    poll();
-    const id = setInterval(poll, 10 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
+    setDismissed(false);
+  }, [status?.latest?.tagName]);
 
   if (!status?.updateAvailable || dismissed || !username) return null;
 

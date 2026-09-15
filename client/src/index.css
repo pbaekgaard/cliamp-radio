@@ -243,6 +243,10 @@ input {
   align-items: center;
 }
 
+.update-check-message {
+  margin: -12px 0 16px;
+}
+
 .station-list {
   margin-top: 20px;
   display: flex;

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { UpdateProvider } from "./UpdateContext";
 import ChangePasswordModal from "./components/ChangePasswordModal";
 import ListenersGlobe from "./components/ListenersGlobe";
 import NavCorner from "./components/NavCorner";
@@ -41,7 +42,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <UpdateProvider>
+        <AppRoutes />
+      </UpdateProvider>
     </AuthProvider>
   );
 }

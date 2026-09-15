@@ -2,18 +2,33 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Station, type Track } from "../api";
 import { useAuth } from "../AuthContext";
+import { useUpdate } from "../UpdateContext";
 
 const emptyDraft = (): { name: string; tracks: Track[] } => ({ name: "", tracks: [{ title: "", path: "" }] });
 
 export default function Dashboard() {
   const { username, logout } = useAuth();
+  const { checking, checkNow } = useUpdate();
   const [stations, setStations] = useState<Station[]>([]);
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draft, setDraft] = useState(emptyDraft());
   const [error, setError] = useState<string | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   async function refresh() {
     setStations(await api.listStations());
+  }
+
+  async function checkUpdatesNow() {
+    setUpdateMessage(null);
+    const res = await checkNow();
+    if (!res) {
+      setUpdateMessage("Couldn't reach GitHub to check for updates.");
+    } else if (res.updateAvailable) {
+      setUpdateMessage(`Update available: ${res.current} → ${res.latest?.tagName} — see the notification button.`);
+    } else {
+      setUpdateMessage(`You're up to date (${res.current}).`);
+    }
   }
 
   useEffect(() => {
@@ -82,6 +97,9 @@ export default function Dashboard() {
         <h1>Stations</h1>
         <div className="header-actions">
           <span className="muted">Signed in as {username}</span>
+          <button className="btn-secondary" onClick={checkUpdatesNow} disabled={checking}>
+            {checking ? "Checking…" : "Check for updates"}
+          </button>
           <Link className="btn-secondary" to="/">
             View globe
           </Link>
@@ -90,6 +108,8 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {updateMessage && <p className="muted update-check-message">{updateMessage}</p>}
 
       <button className="btn-primary" onClick={startNew}>
         + New station
