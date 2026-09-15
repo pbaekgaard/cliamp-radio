@@ -47,6 +47,29 @@ cd client && bun install && bun run build
 cd ../server && bun install && bun run start
 ```
 
+Or simply use `./start.sh --prod` from the repo root, which does both steps.
+
+### Exposing it on port 80
+
+The server reads `PORT` from the environment (defaults to `8000`). On a cloud
+instance with port 80 open, run:
+
+```bash
+sudo PORT=80 ./start.sh --prod
+```
+
+Running as root just to bind port 80 isn't ideal long-term. Instead, grant the
+`bun` binary permission to bind low ports once, then run as your normal user:
+
+```bash
+sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v bun)")"
+PORT=80 ./start.sh --prod
+```
+
+The provided `systemd/cliamp-radio.service` unit already sets `PORT=80` and
+`AmbientCapabilities=CAP_NET_BIND_SERVICE` so the service can bind port 80
+while still running as an unprivileged user.
+
 ## Configuration (environment variables)
 
 | Variable              | Purpose                                                   | Default          |

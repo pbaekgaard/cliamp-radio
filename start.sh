@@ -27,6 +27,10 @@ if [ "$MODE" = "prod" ]; then
   (cd client && bun run build)
 
   echo "==> Starting server (serving API + built client) on http://localhost:${PORT:-8000}"
+  if [ "${PORT:-8000}" -lt 1024 ] && [ "$(id -u)" -ne 0 ]; then
+    echo "    PORT ${PORT} is a privileged port — you may need 'sudo PORT=${PORT} ./start.sh --prod'"
+    echo "    or grant the bun binary CAP_NET_BIND_SERVICE (see README) to avoid running as root."
+  fi
   cd server && exec bun run start
 fi
 

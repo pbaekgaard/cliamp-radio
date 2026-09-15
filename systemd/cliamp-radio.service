@@ -10,6 +10,10 @@ ExecStart=/home/%i/.bun/bin/bun run index.ts
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
+Environment=PORT=80
+# Lets the service bind to port 80 while still running as an unprivileged user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # Set these for real use — see README for how to generate ADMIN_PASSWORD_HASH.
 # Environment=ADMIN_USERNAME=admin
 # Environment=ADMIN_PASSWORD_HASH=...
