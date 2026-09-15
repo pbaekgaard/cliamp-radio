@@ -32,7 +32,13 @@ body,
 }
 
 .globe-page-title {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.globe-page-subtitle {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .stats-grid {
@@ -53,12 +59,18 @@ body,
 .globe-card-bar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding: 10px 16px;
   border-bottom: 1px solid rgba(124, 247, 196, 0.12);
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.globe-card-title {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .live-dot {
@@ -191,10 +203,20 @@ body,
 .stats-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
   background: var(--panel);
   border: 1px solid rgba(124, 247, 196, 0.15);
   border-radius: 10px;
+  overflow: hidden;
+}
+
+.stats-panel-bar {
+  margin: 0;
+}
+
+.stats-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   padding: 16px 18px;
 }
 
@@ -497,6 +519,15 @@ input {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+  margin-bottom: 2px;
+}
+
+.dashboard-subtitle {
+  margin: 0;
+  font-size: 13px;
 }
 
 .header-actions {

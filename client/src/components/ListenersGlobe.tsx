@@ -347,11 +347,13 @@ export default function ListenersGlobe() {
 
   return (
     <div className="globe-page">
-      <h1 className="globe-page-title">cliamp-radio</h1>
+      <h1 className="globe-page-title">Cliamp Radio</h1>
+      <p className="globe-page-subtitle">Self-hosted internet radio, live from baekgaard.dev</p>
       <StationList />
       <div className="stats-grid">
         <div className="globe-card">
           <div className="globe-card-bar">
+            <span className="globe-card-title">Live Listener Map</span>
             <span>
               <span className={`live-dot${live ? "" : " idle"}`} />
               {live ? `${listeners.length} tuned in right now` : "quiet right now"}

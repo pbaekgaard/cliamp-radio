@@ -94,14 +94,17 @@ export default function Dashboard() {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Stations</h1>
+        <div>
+          <h1>Manage Stations</h1>
+          <p className="muted dashboard-subtitle">Cliamp Radio admin</p>
+        </div>
         <div className="header-actions">
           <span className="muted">Signed in as {username}</span>
           <button className="btn-secondary" onClick={checkUpdatesNow} disabled={checking}>
             {checking ? "Checking…" : "Check for updates"}
           </button>
           <Link className="btn-secondary" to="/">
-            View globe
+            View public page
           </Link>
           <button className="btn-secondary" onClick={() => logout()}>
             Log out

@@ -63,13 +63,13 @@ export default function StationList() {
     <div className="station-config-list">
       <div className="station-config-header">
         <div>
-          <h2>Stations</h2>
+          <h2>Radio Stations</h2>
           <p className="muted">
-            Copy a station's <code>[[station]]</code> block straight into your cliamp <code>radios.toml</code>.
+            Add a station straight into your cliamp <code>radios.toml</code> — copy one, or grab them all at once.
           </p>
         </div>
         <button className="btn-secondary" onClick={copyAll}>
-          {copiedAll ? "Copied ✓" : `Copy all (${stations.length})`}
+          {copiedAll ? "Copied ✓" : `Copy all stations (${stations.length})`}
         </button>
       </div>
       <div className="station-config-items">

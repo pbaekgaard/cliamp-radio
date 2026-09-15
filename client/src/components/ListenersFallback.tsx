@@ -3,9 +3,9 @@ import type { Listener } from "../api";
 export default function ListenersFallback({ listeners }: { listeners: Listener[] }) {
   return (
     <div className="listeners-fallback">
-      <h1>cliamp-radio</h1>
+      <h1>Cliamp Radio</h1>
       <p className="muted">
-        Live globe unavailable right now — showing listeners as a list instead.
+        Live map unavailable right now — showing current listeners as a list instead.
       </p>
       <div className="globe-count" style={{ position: "static", display: "inline-block", marginBottom: 16 }}>
         {listeners.length} listener{listeners.length === 1 ? "" : "s"} tuned in right now

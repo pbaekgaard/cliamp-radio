@@ -27,8 +27,8 @@ export default function Login() {
   return (
     <div className="center-page">
       <form className="card" onSubmit={handleSubmit}>
-        <h1>cliamp-radio</h1>
-        <p className="muted">Sign in to manage stations</p>
+        <h1>Cliamp Radio</h1>
+        <p className="muted">Sign in to manage stations and playlists</p>
         <label>
           Username
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
