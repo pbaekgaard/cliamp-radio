@@ -16,6 +16,15 @@ const IDLE_STOP_MS = 5 * 60 * 1000; // stop transcoding this many ms after the l
 const PLAYLIST_REFRESH_MS = 6 * 60 * 60 * 1000; // re-fetch the playlist's video list at most this often
 const MAX_CONSECUTIVE_FAILURES = 5; // give up (rather than spin forever) after this many bad videos in a row
 
+// YouTube increasingly blocks requests from datacenter/VPS IPs with "Sign in
+// to confirm you're not a bot" unless yt-dlp presents cookies from a real,
+// signed-in browser session. Set YTDLP_COOKIES_FILE to the path of a
+// Netscape-format cookies.txt (exported from a logged-in YouTube session,
+// e.g. via the "Get cookies.txt LOCALLY" browser extension) to work around
+// this — see README.md for the full walkthrough.
+const YTDLP_COOKIES_FILE = process.env.YTDLP_COOKIES_FILE || null;
+const YTDLP_COOKIE_ARGS = YTDLP_COOKIES_FILE ? ["--cookies", YTDLP_COOKIES_FILE] : [];
+
 interface PlaylistEntry {
   id: string;
   url: string;
@@ -57,7 +66,15 @@ async function drainText(stream: ReadableStream<Uint8Array> | null): Promise<str
 
 async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[]> {
   const proc = Bun.spawn(
-    ["yt-dlp", "--flat-playlist", "--ignore-errors", "--print", "%(id)s\t%(title)s\t%(uploader)s", playlistUrl],
+    [
+      "yt-dlp",
+      ...YTDLP_COOKIE_ARGS,
+      "--flat-playlist",
+      "--ignore-errors",
+      "--print",
+      "%(id)s\t%(title)s\t%(uploader)s",
+      playlistUrl,
+    ],
     { stdout: "pipe", stderr: "pipe" }
   );
   const [text, stderr] = await Promise.all([new Response(proc.stdout).text(), drainText(proc.stderr)]);
@@ -203,7 +220,18 @@ class PlaylistStream {
 
   private async playEntry(entry: PlaylistEntry, gen: number): Promise<void> {
     const ytdlp = Bun.spawn(
-      ["yt-dlp", "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
+      [
+        "yt-dlp",
+        ...YTDLP_COOKIE_ARGS,
+        "-f",
+        "bestaudio/best",
+        "--no-playlist",
+        "--quiet",
+        "--no-warnings",
+        "-o",
+        "-",
+        entry.url,
+      ],
       { stdout: "pipe", stderr: "pipe" }
     );
     const ffmpeg = Bun.spawn(

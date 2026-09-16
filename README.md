@@ -171,6 +171,26 @@ this server itself:
   [yt-dlp install docs](https://github.com/yt-dlp/yt-dlp#installation)).
   Plain (non-playlist) YouTube video links are unaffected and still play
   directly as before.
+- **YouTube may block a server's IP outright** with `Sign in to confirm
+  you're not a bot`, especially on datacenter/VPS IPs — this is YouTube
+  bot-detection, not a bug in this app. Two things help:
+  1. **Install a JS runtime** (yt-dlp uses it to solve YouTube's player
+     challenges/PO tokens). [Deno](https://deno.com) is the one yt-dlp looks
+     for by default: `curl -fsSL https://deno.land/install.sh | sh`, then
+     make sure `deno` ends up on the same `PATH` the `cliamp-radio` service
+     uses (e.g. symlink it into `/usr/local/bin`).
+  2. **Give yt-dlp cookies from a real, signed-in YouTube session.** Export
+     one as a Netscape-format `cookies.txt` from a browser where you're
+     logged into YouTube (e.g. the
+     ["Get cookies.txt LOCALLY"](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+     extension — visit youtube.com, click the extension, export/download).
+     Copy that file to the server as `server/data/youtube-cookies.txt`
+     (already git-ignored) and set `YTDLP_COOKIES_FILE` to its path in the
+     systemd unit (`sudo ./scripts/install_systemd.sh` writes a
+     commented-out example line — uncomment it and restart the service:
+     `sudo systemctl restart cliamp-radio`). Cookies do expire eventually
+     (typically weeks to months); re-export and re-copy the file if the
+     bot-check comes back.
 
 A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other

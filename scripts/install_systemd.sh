@@ -83,6 +83,11 @@ Environment=NODE_ENV=production
 # Environment=JWT_SECRET=change-me-to-something-random
 # Environment=APP_VERSION=1.0.0
 # Environment=GITHUB_REPO=pbaekgaard/cliamp-radio
+# If YouTube starts blocking this server with "Sign in to confirm you're not
+# a bot" for playlist-backed stations, point this at a cookies.txt exported
+# from a real, signed-in YouTube session — see README.md for how to export
+# and where to put it.
+# Environment=YTDLP_COOKIES_FILE=${REPO_DIR}/server/data/youtube-cookies.txt
 
 [Install]
 WantedBy=multi-user.target
