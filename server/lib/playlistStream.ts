@@ -39,12 +39,28 @@ function encodeIcyMeta(nowPlaying: string): Uint8Array {
   return buf;
 }
 
+const MAX_STDERR_CHARS = 4000; // cap so a runaway/looping process can't bloat memory or logs
+
+// Reads an entire stderr stream to text, bounded so a chatty or runaway
+// process can't grow unbounded in memory. Used purely for error reporting
+// when a subprocess fails — normal/successful runs never have this text
+// looked at.
+async function drainText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (!stream) return "";
+  try {
+    const text = await new Response(stream).text();
+    return text.length > MAX_STDERR_CHARS ? `…${text.slice(-MAX_STDERR_CHARS)}` : text;
+  } catch {
+    return "";
+  }
+}
+
 async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[]> {
   const proc = Bun.spawn(
     ["yt-dlp", "--flat-playlist", "--ignore-errors", "--print", "%(id)s\t%(title)s\t%(uploader)s", playlistUrl],
-    { stdout: "pipe", stderr: "ignore" }
+    { stdout: "pipe", stderr: "pipe" }
   );
-  const text = await new Response(proc.stdout).text();
+  const [text, stderr] = await Promise.all([new Response(proc.stdout).text(), drainText(proc.stderr)]);
   await proc.exited;
 
   const entries: PlaylistEntry[] = [];
@@ -54,6 +70,9 @@ async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[
     if (/^\[(Private|Deleted|Unavailable)/i.test(rawTitle)) continue;
     const { artist, title } = parseArtistTitle(rawTitle, uploader || null);
     entries.push({ id, url: `https://www.youtube.com/watch?v=${id}`, artist, title });
+  }
+  if (entries.length === 0 && stderr.trim()) {
+    console.error(`[playlist-stream] yt-dlp produced no entries for ${playlistUrl}\nyt-dlp stderr: ${stderr.trim()}`);
   }
   return entries;
 }
@@ -185,7 +204,7 @@ class PlaylistStream {
   private async playEntry(entry: PlaylistEntry, gen: number): Promise<void> {
     const ytdlp = Bun.spawn(
       ["yt-dlp", "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
-      { stdout: "pipe", stderr: "ignore" }
+      { stdout: "pipe", stderr: "pipe" }
     );
     const ffmpeg = Bun.spawn(
       // `-re` paces ffmpeg's output to the input's native timestamps (real
@@ -194,10 +213,17 @@ class PlaylistStream {
       // seconds instead of the actual song durations, which would defeat
       // the point of listeners sharing one live playback position.
       ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-i", "pipe:0", "-vn", ...AUDIO_ARGS, "pipe:1"],
-      { stdin: ytdlp.stdout, stdout: "pipe", stderr: "ignore" }
+      { stdin: ytdlp.stdout, stdout: "pipe", stderr: "pipe" }
     );
     this.ytdlpProc = ytdlp;
     this.ffmpegProc = ffmpeg;
+
+    // Both processes' stderr streams are collected in the background (not
+    // logged as they arrive — yt-dlp/ffmpeg can be noisy) so that if either
+    // one fails, we can log the actual error text instead of just an
+    // opaque exit code that's nearly impossible to debug from alone.
+    const ytdlpStderr = drainText(ytdlp.stderr);
+    const ffmpegStderr = drainText(ffmpeg.stderr);
 
     try {
       const reader = ffmpeg.stdout.getReader();
@@ -207,9 +233,15 @@ class PlaylistStream {
         if (done) break;
         if (value && value.length > 0) this.broadcast(value);
       }
-      const ffExit = await ffmpeg.exited;
+      const [ffExit, ytExit] = await Promise.all([ffmpeg.exited, ytdlp.exited]);
       if (ffExit !== 0 && this.generation === gen) {
-        throw new Error(`ffmpeg exited with code ${ffExit}`);
+        const ytErr = (await ytdlpStderr).trim();
+        const ffErr = (await ffmpegStderr).trim();
+        throw new Error(
+          `ffmpeg exited with code ${ffExit} (yt-dlp exited ${ytExit})` +
+            (ytErr ? `\nyt-dlp stderr: ${ytErr}` : "") +
+            (ffErr ? `\nffmpeg stderr: ${ffErr}` : "")
+        );
       }
     } finally {
       this.ytdlpProc = null;
