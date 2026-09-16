@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { extractYouTubePlaylistId } from "./youtube";
 
 export const STATIONS_DIR = path.join(import.meta.dir, "..", "data", "stations");
 
@@ -124,10 +125,22 @@ export async function deleteStation(slug: string): Promise<boolean> {
   }
 }
 
-export function renderM3U(station: Station): string {
+/**
+ * Renders a station as an M3U playlist. Any track whose `path` is a YouTube
+ * playlist link (a "Radio" mix or a saved playlist — anything with a
+ * `list=` param) is rewritten to point at this server's own `/live/`
+ * endpoint instead of the raw YouTube URL. That endpoint is a single,
+ * always-on, shuffled-and-looping radio stream with ICY metadata, so
+ * everyone tuning in to that track hears the same thing at the same time —
+ * instead of each listener's player independently restarting the playlist
+ * from track one via yt-dlp/YouTube itself.
+ */
+export function renderM3U(station: Station, baseUrl: string): string {
   const lines = ["#EXTM3U", `#PLAYLIST:${station.name}`];
   for (const track of station.tracks) {
-    lines.push(`#EXTINF:-1,${track.title}`, track.path);
+    const playlistId = extractYouTubePlaylistId(track.path);
+    const path = playlistId ? `${baseUrl}/cliamp-radio/live/${playlistId}.mp3` : track.path;
+    lines.push(`#EXTINF:-1,${track.title}`, path);
   }
   return lines.join("\n") + "\n";
 }

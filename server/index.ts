@@ -19,6 +19,7 @@ import {
   slugify,
   type Station,
 } from "./lib/stations";
+import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, stopAllPlaylistStreams } from "./lib/playlistStream";
 
 const PORT = Number(process.env.PORT || 8000);
 const CLIENT_DIST = path.join(import.meta.dir, "..", "client", "dist");
@@ -48,6 +49,36 @@ const server = Bun.serve({
     const url = new URL(req.url);
     const { pathname } = url;
 
+    // --- Live playlist-stream audio (public) ---
+    // Backs the URLs that renderM3U() rewrites YouTube-playlist tracks to: a
+    // single always-on, shuffled-and-looping transcode of the playlist, so
+    // every listener hears the same audio at the same position, with ICY
+    // "now playing" metadata carrying the current artist/title.
+    if (pathname.startsWith("/cliamp-radio/live/")) {
+      let playlistId = decodeURIComponent(pathname.replace("/cliamp-radio/live/", "")).replace(/\/+$/, "");
+      if (playlistId.endsWith(".mp3")) playlistId = playlistId.slice(0, -4);
+      if (!playlistId || playlistId.includes("/") || playlistId === "." || playlistId === "..") {
+        return new Response("Not found", { status: 404 });
+      }
+      const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
+      const wantsMeta = req.headers.get("icy-metadata") === "1";
+      const stream = getOrCreatePlaylistStream(playlistId, playlistUrl).subscribe(wantsMeta);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "icy-name": "cliamp-radio",
+      };
+      if (wantsMeta) headers["icy-metaint"] = String(ICY_METAINT);
+      return new Response(stream, { headers });
+    }
+
+    // --- Playlist-stream status (now playing / listener count) ---
+    const nowPlayingMatch = pathname.match(/^\/api\/playlist-stream\/([^/]+)\/status$/);
+    if (nowPlayingMatch && req.method === "GET") {
+      return json(getPlaylistStreamStatus(decodeURIComponent(nowPlayingMatch[1]!)));
+    }
+
     // --- Station M3U streaming (public) ---
     if (pathname.startsWith("/cliamp-radio/")) {
       let slug = decodeURIComponent(pathname.replace("/cliamp-radio/", "")).replace(/\/+$/, "");
@@ -60,7 +91,8 @@ const server = Bun.serve({
 
       recordListen(clientIp(req, srv), station.slug, station.name);
 
-      return new Response(renderM3U(station), {
+      const baseUrl = `${url.protocol}//${url.host}`;
+      return new Response(renderM3U(station, baseUrl), {
         headers: { "Content-Type": "audio/x-mpegurl; charset=utf-8" },
       });
     }
@@ -206,3 +238,10 @@ const server = Bun.serve({
 });
 
 console.log(`cliamp-radio server listening on http://0.0.0.0:${PORT}`);
+
+function shutdown() {
+  stopAllPlaylistStreams();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

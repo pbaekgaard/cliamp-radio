@@ -143,6 +143,35 @@ stations and their tracks. Each station is served as an M3U playlist at
 `/cliamp-radio/<slug>.m3u`, ready to hand to cliamp or any player that
 understands M3U.
 
+### YouTube playlist tracks become a shared live stream
+
+If a track's URL is a YouTube playlist (or "Radio" mix) link — anything with
+a `list=` param, e.g. `https://www.youtube.com/playlist?list=PL...` — the
+station's M3U doesn't hand out that raw YouTube URL. Instead it's rewritten
+to `/cliamp-radio/live/<playlistId>.mp3`, a stream generated and hosted by
+this server itself:
+
+- The playlist's videos are pulled one at a time with
+  [`yt-dlp`](https://github.com/yt-dlp/yt-dlp), transcoded to MP3 with
+  `ffmpeg`, played back in **shuffled order on an infinite loop** (reshuffled
+  every time it runs out), and broadcast to every connected listener at the
+  same playback position — like a real radio station, not a personal
+  playlist that restarts from track one each time someone tunes in. That's
+  what lets you send a station's URL to a friend and listen along together.
+- ICY `StreamTitle` metadata is updated per-track with a best-effort
+  "Artist - Title" (parsed from the video title, falling back to the
+  channel/uploader name), so any player that understands Icecast/Shoutcast
+  "now playing" metadata (most of them) shows what's currently playing.
+- The stream only runs while at least one listener is connected — it starts
+  on the first request and stops itself 5 minutes after the last listener
+  leaves — and the playlist's video list is periodically refreshed (every 6
+  hours) to pick up additions/removals.
+- **Requires `yt-dlp` and `ffmpeg` to be installed** on the machine running
+  the server (`apt install ffmpeg`, and see the
+  [yt-dlp install docs](https://github.com/yt-dlp/yt-dlp#installation)).
+  Plain (non-playlist) YouTube video links are unaffected and still play
+  directly as before.
+
 A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other
 station's tracks with duplicates (matched by stream URL) removed. It's
