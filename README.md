@@ -219,32 +219,37 @@ this server itself:
   3. **(Optional, recommended alongside `YTDLP_COOKIES_FROM_BROWSER`) Keep
      the session itself warm automatically.** `scripts/cookie-refresh/`
      is a small standalone Playwright script that periodically opens the
-     *same* browser profile in a real, actually-installed Google Chrome
-     (not a bundled/generic Chromium — Google Chrome specifically, via
-     Playwright's `channel: "chrome"`) and just visits youtube.com for a
-     few seconds, like an ordinary person would. Run on a timer, this
-     reduces (doesn't eliminate — nothing can) how often Google's session
-     ever expires or asks for a fresh interactive sign-in:
+     *same* browser profile and just visits youtube.com for a few seconds,
+     like an ordinary person would. It prefers real Google Chrome
+     (Playwright's `channel: "chrome"`) when available, but auto-detects a
+     system Chromium install as a fallback — useful since **Google doesn't
+     publish official Chrome builds for Linux ARM**, so ARM servers (e.g.
+     `uname -m` says `aarch64`/`arm64`) need Chromium instead. Run on a
+     timer, this reduces (doesn't eliminate — nothing can) how often
+     Google's session ever expires or asks for a fresh interactive sign-in:
      ```bash
-     # One-time setup on the server:
-     sudo apt install -y google-chrome-stable   # or use the .deb from google.com/chrome
+     # One-time setup on the server — pick whichever applies:
+     sudo apt install -y google-chrome-stable   # x86_64: needs Google's own apt repo/deb, not always in default apt
+     sudo apt install -y chromium-browser        # ARM (or if Chrome isn't available): a real, JS-executing browser too
      cd scripts/cookie-refresh && bun install
 
      # One-time login (same profile YTDLP_COOKIES_FROM_BROWSER points at).
      # Needs a display — use ssh -X or a throwaway VNC session:
      bun run login
-     # A visible Chrome window opens to accounts.google.com. Sign in, then
-     # just close the window — the script exits on its own.
+     # A visible Chrome/Chromium window opens to accounts.google.com. Sign
+     # in, then just close the window — the script exits on its own.
 
      # Install the keep-alive timer (runs every ~12h + jitter from then on):
      sudo ./install_cookie_refresh_timer.sh
      ```
-     Note this needs *real* Google Chrome installed (`google-chrome-stable`),
-     not just Chromium — Playwright's `channel: "chrome"` specifically
-     launches the genuine Google-signed browser, since that's what a normal
-     user's machine would be running. If you'd rather skip this automation,
-     everything above still works fine without it; you'll just need to
-     repeat the manual login a bit more often.
+     The script auto-detects Chrome/Chromium at common install paths (or
+     set `CHROME_EXECUTABLE_PATH` to point at a specific binary yourself).
+     Whichever it uses, it's still a real, full browser — what matters for
+     keeping cookies/sessions valid is that it actually renders pages and
+     runs JS like a normal visit, not which specific browser brand it is.
+     If you'd rather skip this automation, everything above still works
+     fine without it; you'll just need to repeat the manual login a bit
+     more often.
 
 A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other

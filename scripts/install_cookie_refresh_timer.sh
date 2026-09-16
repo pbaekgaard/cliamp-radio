@@ -53,9 +53,11 @@ if [ -z "$BUN_BIN" ]; then
   exit 1
 fi
 
-if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
-  echo "==> WARNING: couldn't find 'google-chrome'/'google-chrome-stable' on PATH."
-  echo "    Install real Google Chrome (not just Chromium) first — see README.md."
+if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1 \
+   && ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1 \
+   && [ ! -e /snap/bin/chromium ]; then
+  echo "==> WARNING: couldn't find Chrome or Chromium on PATH."
+  echo "    Install one first — see README.md (Google Chrome on x86_64, Chromium on ARM)."
 fi
 
 echo "==> Repo:    ${REPO_DIR}"

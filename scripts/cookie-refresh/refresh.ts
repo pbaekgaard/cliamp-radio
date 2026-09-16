@@ -1,9 +1,16 @@
-// Keeps a real, signed-in Google Chrome session warm so yt-dlp can read
-// live cookies from it (via YTDLP_COOKIES_FROM_BROWSER) without ever going
-// stale. This drives an *actual* installed Google Chrome through Playwright
-// — not a bare HTTP client like yt-dlp itself — so from YouTube's point of
+// Keeps a real, signed-in browser session warm so yt-dlp can read live
+// cookies from it (via YTDLP_COOKIES_FROM_BROWSER) without ever going stale.
+// This drives an *actual* installed Chrome/Chromium through Playwright —
+// not a bare HTTP client like yt-dlp itself — so from YouTube's point of
 // view this looks like an ordinary person periodically visiting the site,
 // which is exactly what keeps a session's cookies alive and unflagged.
+//
+// Prefers real Google Chrome (Playwright's "chrome" channel) when
+// available, since that's the most ordinary-looking option — but Google
+// doesn't ship official Chrome builds for Linux ARM, so on ARM servers this
+// falls back to a system-installed Chromium instead (still a real,
+// JS-executing browser; just not Google-branded). Override with
+// CHROME_EXECUTABLE_PATH if auto-detection picks the wrong binary.
 //
 // Two modes:
 //   bun run refresh.ts --login    Opens Chrome with a visible window so you
@@ -21,18 +28,50 @@
 // bot-detection exists to catch). This only keeps an already-established
 // session alive for as long as possible afterwards.
 
+import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright-core";
 
 const PROFILE_DIR = path.join(import.meta.dir, "..", "..", "server", "data", "yt-browser-profile");
 const isLogin = process.argv.includes("--login");
 
+// Common install locations for a real Chrome/Chromium binary, checked in
+// order of preference (most ordinary-looking first). Snap-packaged
+// Chromium on Ubuntu (chromium-browser -> /snap/bin/chromium) is common on
+// ARM servers, where Google doesn't publish official Chrome builds at all.
+const CANDIDATE_PATHS = [
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+  "/snap/bin/chromium",
+];
+
+function resolveExecutablePath(): string | undefined {
+  if (process.env.CHROME_EXECUTABLE_PATH) return process.env.CHROME_EXECUTABLE_PATH;
+  for (const candidate of CANDIDATE_PATHS) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined; // fall back to Playwright's own "chrome" channel resolution
+}
+
 async function main() {
-  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    channel: "chrome", // use the real, system-installed Google Chrome, not Playwright's bundled Chromium
+  const executablePath = resolveExecutablePath();
+  const launchOptions: Parameters<typeof chromium.launchPersistentContext>[1] = {
     headless: !isLogin,
     viewport: { width: 1280, height: 800 },
-  });
+    // Snap-confined Chromium (common on ARM Ubuntu servers) needs this to
+    // launch under automation; harmless for a plain Chrome binary too.
+    args: ["--no-sandbox"],
+  };
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    launchOptions.channel = "chrome"; // real, system-installed Google Chrome
+  }
+  console.log(`==> Using browser: ${executablePath ?? "Playwright 'chrome' channel"}`);
+
+  const context = await chromium.launchPersistentContext(PROFILE_DIR, launchOptions);
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
