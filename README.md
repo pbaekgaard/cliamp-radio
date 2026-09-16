@@ -173,24 +173,48 @@ this server itself:
   directly as before.
 - **YouTube may block a server's IP outright** with `Sign in to confirm
   you're not a bot`, especially on datacenter/VPS IPs — this is YouTube
-  bot-detection, not a bug in this app. Two things help:
+  bot-detection, not a bug in this app, and there's no way to make it 100%
+  hands-off forever (that would require an always-valid signed-in Google
+  session, which only Google controls the lifetime of). Two things help:
   1. **Install a JS runtime** (yt-dlp uses it to solve YouTube's player
      challenges/PO tokens). [Deno](https://deno.com) is the one yt-dlp looks
      for by default: `curl -fsSL https://deno.land/install.sh | sh`, then
      make sure `deno` ends up on the same `PATH` the `cliamp-radio` service
      uses (e.g. symlink it into `/usr/local/bin`).
-  2. **Give yt-dlp cookies from a real, signed-in YouTube session.** Export
-     one as a Netscape-format `cookies.txt` from a browser where you're
-     logged into YouTube (e.g. the
-     ["Get cookies.txt LOCALLY"](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
-     extension — visit youtube.com, click the extension, export/download).
-     Copy that file to the server as `server/data/youtube-cookies.txt`
-     (already git-ignored) and set `YTDLP_COOKIES_FILE` to its path in the
-     systemd unit (`sudo ./scripts/install_systemd.sh` writes a
-     commented-out example line — uncomment it and restart the service:
-     `sudo systemctl restart cliamp-radio`). Cookies do expire eventually
-     (typically weeks to months); re-export and re-copy the file if the
-     bot-check comes back.
+  2. **Give yt-dlp cookies from a real, signed-in YouTube session.** Two
+     options, from least to most maintenance:
+
+     - **`YTDLP_COOKIES_FROM_BROWSER` (recommended)** — point at a real
+       browser profile on the server that's logged into a Google account,
+       and yt-dlp reads cookies live from it on every single request. Set
+       up once, no manual re-export ever:
+       ```bash
+       # One-time setup on the server:
+       sudo apt install -y chromium-browser   # or chromium, depending on distro
+       mkdir -p server/data/yt-browser-profile
+       # Log into YouTube inside that profile once. If the server has no
+       # display, do this over SSH with X11 forwarding (ssh -X) or a
+       # throwaway VNC session:
+       chromium-browser --user-data-dir="$(pwd)/server/data/yt-browser-profile" https://accounts.google.com
+       # Sign in, then close the browser once you're logged in.
+       ```
+       Then set (already scaffolded, commented-out, by `install_systemd.sh`):
+       ```ini
+       Environment=YTDLP_COOKIES_FROM_BROWSER=chromium:/full/path/to/server/data/yt-browser-profile
+       ```
+       and `sudo systemctl daemon-reload && sudo systemctl restart cliamp-radio`.
+       This keeps working for as long as that Google session stays valid —
+       typically months — with zero SSH visits in between. If Google ever
+       forces a fresh interactive sign-in (rare, but possible on any
+       account), you'll need to repeat the one-time login step above; no
+       automation can avoid that particular case.
+     - **`YTDLP_COOKIES_FILE`** — a static Netscape-format `cookies.txt`
+       exported from a browser via an extension like
+       ["Get cookies.txt LOCALLY"](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc).
+       Simpler to set up but it's a point-in-time snapshot that will
+       eventually go stale and need manually re-exporting/copying to the
+       server — only use this if a persistent browser profile isn't
+       practical for you.
 
 A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other

@@ -18,12 +18,28 @@ const MAX_CONSECUTIVE_FAILURES = 5; // give up (rather than spin forever) after 
 
 // YouTube increasingly blocks requests from datacenter/VPS IPs with "Sign in
 // to confirm you're not a bot" unless yt-dlp presents cookies from a real,
-// signed-in browser session. Set YTDLP_COOKIES_FILE to the path of a
-// Netscape-format cookies.txt (exported from a logged-in YouTube session,
-// e.g. via the "Get cookies.txt LOCALLY" browser extension) to work around
-// this — see README.md for the full walkthrough.
+// signed-in browser session. Two ways to supply them, checked in this order:
+//
+// 1. YTDLP_COOKIES_FROM_BROWSER (recommended): a value like
+//    "chromium:/path/to/profile-dir" pointing at a real browser profile kept
+//    logged into a Google account on this machine. yt-dlp reads cookies
+//    live from that profile on every single request, so — unlike a static
+//    file — this never goes stale on its own; it just keeps working for as
+//    long as that browser profile stays logged in (typically months), with
+//    no manual re-export/copy step ever required. See README.md for how to
+//    set this up once.
+// 2. YTDLP_COOKIES_FILE: a static Netscape-format cookies.txt (exported via
+//    a browser extension). Simpler to set up, but it's a point-in-time
+//    snapshot that WILL eventually expire and need re-exporting by hand —
+//    only use this if setting up a persistent browser profile isn't
+//    practical for you.
+const YTDLP_COOKIES_FROM_BROWSER = process.env.YTDLP_COOKIES_FROM_BROWSER || null;
 const YTDLP_COOKIES_FILE = process.env.YTDLP_COOKIES_FILE || null;
-const YTDLP_COOKIE_ARGS = YTDLP_COOKIES_FILE ? ["--cookies", YTDLP_COOKIES_FILE] : [];
+const YTDLP_COOKIE_ARGS = YTDLP_COOKIES_FROM_BROWSER
+  ? ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
+  : YTDLP_COOKIES_FILE
+    ? ["--cookies", YTDLP_COOKIES_FILE]
+    : [];
 
 interface PlaylistEntry {
   id: string;

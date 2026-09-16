@@ -84,9 +84,12 @@ Environment=NODE_ENV=production
 # Environment=APP_VERSION=1.0.0
 # Environment=GITHUB_REPO=pbaekgaard/cliamp-radio
 # If YouTube starts blocking this server with "Sign in to confirm you're not
-# a bot" for playlist-backed stations, point this at a cookies.txt exported
-# from a real, signed-in YouTube session — see README.md for how to export
-# and where to put it.
+# a bot" for playlist-backed stations, give yt-dlp cookies from a real,
+# signed-in YouTube session — see README.md for full setup instructions.
+# Recommended: point at a persistent, already-logged-in browser profile so
+# it never needs manual re-export:
+# Environment=YTDLP_COOKIES_FROM_BROWSER=chromium:${REPO_DIR}/server/data/yt-browser-profile
+# Simpler but requires re-exporting by hand periodically:
 # Environment=YTDLP_COOKIES_FILE=${REPO_DIR}/server/data/youtube-cookies.txt
 
 [Install]
