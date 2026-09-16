@@ -293,16 +293,6 @@ body,
   color: inherit;
 }
 
-.station-track-badge {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 11px;
-  color: var(--accent);
-  background: rgba(124, 247, 196, 0.1);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-
 /* --- Stats side panel --- */
 .stats-side {
   display: flex;

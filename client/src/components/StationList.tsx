@@ -33,18 +33,6 @@ function legacyCopy(text: string) {
   document.body.removeChild(ta);
 }
 
-// Mirrors server/lib/youtube.ts#extractYouTubePlaylistId — used here only to
-// badge tracks that stream live (shuffled/looping) instead of playing once.
-function isYouTubePlaylistUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (!/(^|\.)youtube\.com$|(^|\.)music\.youtube\.com$|(^|\.)youtu\.be$/.test(url.hostname)) return false;
-    return /[?&]list=/.test(value);
-  } catch {
-    return false;
-  }
-}
-
 export default function StationList() {
   const [stations, setStations] = useState<Station[]>([]);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
@@ -169,11 +157,6 @@ export default function StationList() {
                     {tracks.map((t, i) => (
                       <li key={i}>
                         <span className="station-track-title">{t.title}</span>
-                        {isYouTubePlaylistUrl(t.path) && (
-                          <span className="station-track-badge" title="Streams shuffled &amp; looping">
-                            🔀 playlist
-                          </span>
-                        )}
                       </li>
                     ))}
                     {tracks.length === 0 && <li className="muted">No tracks yet.</li>}
