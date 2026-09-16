@@ -40,15 +40,16 @@ const isLogin = process.argv.includes("--login");
 // Chromium on Ubuntu (chromium-browser -> /snap/bin/chromium) is common on
 // ARM servers, where Google doesn't publish official Chrome builds at all.
 const CANDIDATE_PATHS = [
+  process.env.CHROME_EXECUTABLE_PATH,
   "/usr/bin/google-chrome-stable",
   "/usr/bin/google-chrome",
+  "/usr/bin/helium-browser",
   "/usr/bin/chromium-browser",
   "/usr/bin/chromium",
   "/snap/bin/chromium",
-];
+].filter((p): p is string => Boolean(p));
 
 function resolveExecutablePath(): string | undefined {
-  if (process.env.CHROME_EXECUTABLE_PATH) return process.env.CHROME_EXECUTABLE_PATH;
   for (const candidate of CANDIDATE_PATHS) {
     if (fs.existsSync(candidate)) return candidate;
   }
@@ -62,7 +63,12 @@ async function main() {
     viewport: { width: 1280, height: 800 },
     // Snap-confined Chromium (common on ARM Ubuntu servers) needs this to
     // launch under automation; harmless for a plain Chrome binary too.
-    args: ["--no-sandbox"],
+    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    // Playwright normally passes --enable-automation, which sets
+    // navigator.webdriver and other tells Google's sign-in page explicitly
+    // checks for ("This browser or app may not be secure"). Dropping it
+    // makes this look like an ordinary browser launch instead.
+    ignoreDefaultArgs: ["--enable-automation"],
   };
   if (executablePath) {
     launchOptions.executablePath = executablePath;

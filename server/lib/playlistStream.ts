@@ -41,6 +41,14 @@ const YTDLP_COOKIE_ARGS = YTDLP_COOKIES_FROM_BROWSER
     ? ["--cookies", YTDLP_COOKIES_FILE]
     : [];
 
+// yt-dlp increasingly needs to solve a JS "signature"/"n" challenge to get
+// playable URLs at all (independent of cookies/bot-detection above) — when
+// installed via pip/apt (as opposed to yt-dlp's own standalone release
+// build) it won't auto-fetch the solver component unless explicitly
+// allowed here. Requires a JS runtime on PATH too (Deno; see README).
+// Harmless/no-op if a bundled solver is already present.
+const YTDLP_EXTRA_ARGS = ["--remote-components", "ejs:github"];
+
 interface PlaylistEntry {
   id: string;
   url: string;
@@ -85,6 +93,7 @@ async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[
     [
       "yt-dlp",
       ...YTDLP_COOKIE_ARGS,
+      ...YTDLP_EXTRA_ARGS,
       "--flat-playlist",
       "--ignore-errors",
       "--print",
@@ -239,6 +248,7 @@ class PlaylistStream {
       [
         "yt-dlp",
         ...YTDLP_COOKIE_ARGS,
+        ...YTDLP_EXTRA_ARGS,
         "-f",
         "bestaudio/best",
         "--no-playlist",
