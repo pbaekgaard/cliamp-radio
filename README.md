@@ -216,6 +216,36 @@ this server itself:
        server — only use this if a persistent browser profile isn't
        practical for you.
 
+  3. **(Optional, recommended alongside `YTDLP_COOKIES_FROM_BROWSER`) Keep
+     the session itself warm automatically.** `scripts/cookie-refresh/`
+     is a small standalone Playwright script that periodically opens the
+     *same* browser profile in a real, actually-installed Google Chrome
+     (not a bundled/generic Chromium — Google Chrome specifically, via
+     Playwright's `channel: "chrome"`) and just visits youtube.com for a
+     few seconds, like an ordinary person would. Run on a timer, this
+     reduces (doesn't eliminate — nothing can) how often Google's session
+     ever expires or asks for a fresh interactive sign-in:
+     ```bash
+     # One-time setup on the server:
+     sudo apt install -y google-chrome-stable   # or use the .deb from google.com/chrome
+     cd scripts/cookie-refresh && bun install
+
+     # One-time login (same profile YTDLP_COOKIES_FROM_BROWSER points at).
+     # Needs a display — use ssh -X or a throwaway VNC session:
+     bun run login
+     # A visible Chrome window opens to accounts.google.com. Sign in, then
+     # just close the window — the script exits on its own.
+
+     # Install the keep-alive timer (runs every ~12h + jitter from then on):
+     sudo ./install_cookie_refresh_timer.sh
+     ```
+     Note this needs *real* Google Chrome installed (`google-chrome-stable`),
+     not just Chromium — Playwright's `channel: "chrome"` specifically
+     launches the genuine Google-signed browser, since that's what a normal
+     user's machine would be running. If you'd rather skip this automation,
+     everything above still works fine without it; you'll just need to
+     repeat the manual login a bit more often.
+
 A built-in **"All Stations"** playlist (`/cliamp-radio/all.m3u`) is always
 available and automatically kept in sync — it's the union of every other
 station's tracks with duplicates (matched by stream URL) removed. It's

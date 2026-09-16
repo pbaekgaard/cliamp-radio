@@ -1,0 +1,15 @@
+{
+  "name": "cookie-refresh",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "bun run refresh.ts --login",
+    "refresh": "bun run refresh.ts"
+  },
+  "dependencies": {
+    "playwright-core": "^1.48.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
