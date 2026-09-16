@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, type Station } from "../api";
 
+// Matches server/lib/stations.ts's HEADER_PLACEHOLDER_URL — the inert
+// divider entries injected between each station's tracks in the
+// auto-generated "All Stations" playlist. Filtered out of the track
+// dropdown below since they aren't real songs.
+const HEADER_PLACEHOLDER_URL = "https://cliamp-radio.invalid/divider";
+
 function buildConfig(station: Station): string {
   const host = window.location.hostname;
   const origin = window.location.origin;
@@ -27,11 +33,24 @@ function legacyCopy(text: string) {
   document.body.removeChild(ta);
 }
 
+// Mirrors server/lib/youtube.ts#extractYouTubePlaylistId — used here only to
+// badge tracks that stream live (shuffled/looping) instead of playing once.
+function isYouTubePlaylistUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (!/(^|\.)youtube\.com$|(^|\.)music\.youtube\.com$|(^|\.)youtu\.be$/.test(url.hostname)) return false;
+    return /[?&]list=/.test(value);
+  } catch {
+    return false;
+  }
+}
+
 export default function StationList() {
   const [stations, setStations] = useState<Station[]>([]);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
 
   useEffect(() => {
     api.listStations().then(setStations).catch(() => {});
@@ -79,6 +98,10 @@ export default function StationList() {
     setTimeout(() => setCopiedAll(false), 1600);
   }
 
+  function toggleExpand(slug: string) {
+    setExpandedSlug((s) => (s === slug ? null : slug));
+  }
+
   if (!stations.length) return null;
 
   return (
@@ -97,22 +120,66 @@ export default function StationList() {
       <div className="station-config-items">
         {stations.map((s) => {
           const n = counts[s.slug] || 0;
+          const tracks = s.tracks.filter((t) => t.path !== HEADER_PLACEHOLDER_URL);
+          const expanded = expandedSlug === s.slug;
           return (
-            <div className="station-config-item" key={s.slug}>
-              <div>
-                <div className="station-config-name">
-                  {s.name}
-                  {s.virtual && <span className="badge">auto-generated</span>}
-                  <span className={`station-listener-count${n > 0 ? " live" : ""}`}>
-                    <span className={`live-dot${n > 0 ? "" : " idle"}`} />
-                    {n} listening
-                  </span>
+            <div className="station-config-wrap" key={s.slug}>
+              <div
+                className="station-config-item station-config-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleExpand(s.slug)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleExpand(s.slug);
+                  }
+                }}
+                aria-expanded={expanded}
+                aria-label={expanded ? "Hide tracks" : "Show tracks"}
+              >
+                <div className="station-config-info">
+                  <div className="station-config-name">
+                    {s.name}
+                    {s.virtual && <span className="badge">auto-generated</span>}
+                    <span className={`station-listener-count${n > 0 ? " live" : ""}`}>
+                      <span className={`live-dot${n > 0 ? "" : " idle"}`} />
+                      {n} listening
+                    </span>
+                  </div>
+                  <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
                 </div>
-                <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
+                <button
+                  className="btn-secondary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copy(s);
+                  }}
+                >
+                  {copiedSlug === s.slug ? "Copied ✓" : "Copy config"}
+                </button>
+                <span className="station-expand-toggle" aria-hidden="true">
+                  <span className={`station-expand-chevron${expanded ? " open" : ""}`}>▸</span>
+                </span>
               </div>
-              <button className="btn-secondary" onClick={() => copy(s)}>
-                {copiedSlug === s.slug ? "Copied ✓" : "Copy config"}
-              </button>
+              {expanded && (
+                <div className="station-track-panel">
+                  <p className="station-track-header">Channels:</p>
+                  <ul className="station-track-list">
+                    {tracks.map((t, i) => (
+                      <li key={i}>
+                        <span className="station-track-title">{t.title}</span>
+                        {isYouTubePlaylistUrl(t.path) && (
+                          <span className="station-track-badge" title="Streams shuffled &amp; looping">
+                            🔀 playlist
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                    {tracks.length === 0 && <li className="muted">No tracks yet.</li>}
+                  </ul>
+                </div>
+              )}
             </div>
           );
         })}
