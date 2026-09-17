@@ -48,17 +48,25 @@ export function extractYouTubeVideoId(url: string): string | null {
 }
 
 /**
- * Resolves the browser-playable live-stream URL for a track, whether it's a
- * YouTube playlist link (shares the same always-on channel stream as the
- * .m3u output), a plain single-video link (lazily transcoded on demand,
- * web-only — never referenced by any station's .m3u), or DEIF FM's queue
- * marker. Returns null for tracks with no resolvable stream.
+ * Resolves the browser-playable live-stream URL for a track: a YouTube
+ * playlist link (shares the same always-on channel stream as the .m3u
+ * output), DEIF FM's queue marker, or a plain non-YouTube http(s) stream
+ * URL (e.g. a direct internet-radio stream like GTA radio stations) which
+ * is already natively playable and used as-is. Plain single YouTube video
+ * links (no `list=` param) are intentionally excluded — tune-in is only
+ * offered for playlist channels and already-streamable direct URLs.
+ * Returns null for tracks with no resolvable stream.
  */
 export function tuneInUrlForTrack(path: string): string | null {
   if (path === DEIF_QUEUE_MARKER) return "/cliamp-radio/live/deif-fm.mp3";
   const playlistId = extractYouTubePlaylistId(path);
   if (playlistId) return `/cliamp-radio/live/${playlistId}.mp3`;
-  const videoId = extractYouTubeVideoId(path);
-  if (videoId) return `/cliamp-radio/live/video/${videoId}.mp3`;
+  if (extractYouTubeVideoId(path)) return null;
+  try {
+    const parsed = new URL(path);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return path;
+  } catch {
+    // not a valid absolute URL — nothing to tune into
+  }
   return null;
 }

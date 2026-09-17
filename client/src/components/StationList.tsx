@@ -159,8 +159,6 @@ export default function StationList() {
               ? [...stationPlaylistIds].reduce((sum, id) => sum + (playlistStatuses[id]?.listeners ?? 0), 0)
               : counts[s.slug] || 0;
           const expanded = expandedSlug === s.slug;
-          const stationTuneInUrl = tracks.map((t) => tuneInUrlForTrack(t.path)).find((u): u is string => !!u) ?? null;
-          const stationIsPlaying = stationTuneInUrl !== null && nowPlaying?.url === stationTuneInUrl;
           return (
             <div className="station-config-wrap" key={s.slug}>
               <div
@@ -188,17 +186,6 @@ export default function StationList() {
                   </div>
                   <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
                 </div>
-                {stationTuneInUrl && (
-                  <button
-                    className="btn-primary tune-in-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle(stationTuneInUrl, s.name);
-                    }}
-                  >
-                    {stationIsPlaying ? "⏸ Playing" : "▶ Tune in"}
-                  </button>
-                )}
                 <button
                   className="btn-secondary"
                   onClick={(e) => {
