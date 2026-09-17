@@ -15,6 +15,12 @@ import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
+// A "listener" is anyone whose /deif page has polled the queue within this
+// window (see index.ts, which touches presence on every GET /api/deif/queue
+// — the page already polls every few seconds, so this doubles as a
+// heartbeat with no extra requests). Used both for the listeners list and
+// as the denominator for the skip-vote majority below.
+const PRESENCE_TTL_MS = 20_000;
 
 export interface QueueItem {
   id: number;
@@ -78,6 +84,8 @@ class DeifQueueStream {
   private waiters: Array<() => void> = [];
   private ytdlpProc: ReturnType<typeof Bun.spawn> | null = null;
   private ffmpegProc: ReturnType<typeof Bun.spawn> | null = null;
+  private presence = new Map<string, number>(); // name -> last-seen timestamp
+  private skipVotes = new Set<string>(); // names who voted to skip the current track
 
   get status() {
     return {
@@ -90,8 +98,40 @@ class DeifQueueStream {
     };
   }
 
-  list(): { nowPlaying: QueueItem | null; queue: QueueItem[] } {
-    return { nowPlaying: this.current, queue: [...this.queue] };
+  /** Records that `name` is actively viewing the DEIF FM page right now. */
+  touchPresence(name: string) {
+    this.presence.set(name, Date.now());
+  }
+
+  /** Names seen within PRESENCE_TTL_MS, sorted; also prunes stale entries. */
+  private activeListenerNames(): string[] {
+    const now = Date.now();
+    const names: string[] = [];
+    for (const [name, lastSeen] of this.presence) {
+      if (now - lastSeen <= PRESENCE_TTL_MS) names.push(name);
+      else this.presence.delete(name);
+    }
+    return names.sort((a, b) => a.localeCompare(b));
+  }
+
+  list(viewerName?: string): {
+    nowPlaying: QueueItem | null;
+    queue: QueueItem[];
+    listeners: string[];
+    skipVote: { votes: number; total: number; hasVoted: boolean };
+  } {
+    if (viewerName) this.touchPresence(viewerName);
+    const listeners = this.activeListenerNames();
+    return {
+      nowPlaying: this.current,
+      queue: [...this.queue],
+      listeners,
+      skipVote: {
+        votes: this.skipVotes.size,
+        total: Math.max(listeners.length, 1),
+        hasVoted: !!viewerName && this.skipVotes.has(viewerName.toLowerCase()),
+      },
+    };
   }
 
   /** Starts the perpetual playback loop the first time it's called; safe to call repeatedly. */
@@ -141,12 +181,45 @@ class DeifQueueStream {
     return { ok: true };
   }
 
-  /** Skips the currently playing track; only the person who added it may skip it. */
-  skipCurrent(requestedBy: string): { ok: boolean; error?: string } {
+  /**
+   * Skips the currently playing track. The person who added it can skip it
+   * instantly (they get to change their mind); anyone else instead casts a
+   * vote, and the track is skipped as soon as votes reach a majority of
+   * currently-present listeners — or an exact 50/50 split, since a tie
+   * means at least half the room wants it gone.
+   */
+  requestSkip(requestedBy: string): {
+    ok: boolean;
+    error?: string;
+    skipped?: boolean;
+    votes?: number;
+    total?: number;
+    hasVoted?: boolean;
+  } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
-    if (this.current.addedBy.toLowerCase() !== requestedBy.toLowerCase()) {
-      return { ok: false, error: "you can only skip entries you added" };
+    const name = requestedBy.toLowerCase();
+
+    if (this.current.addedBy.toLowerCase() === name) {
+      this.killPlayback();
+      return { ok: true, skipped: true };
     }
+
+    // Toggle: voting again removes your vote, in case you change your mind.
+    if (this.skipVotes.has(name)) this.skipVotes.delete(name);
+    else this.skipVotes.add(name);
+
+    const total = Math.max(this.activeListenerNames().length, 1);
+    const votes = this.skipVotes.size;
+    if (votes * 2 >= total) {
+      this.skipVotes.clear();
+      this.killPlayback();
+      return { ok: true, skipped: true };
+    }
+    return { ok: true, skipped: false, votes, total, hasVoted: this.skipVotes.has(name) };
+  }
+
+  /** Kills the in-flight yt-dlp/ffmpeg pair, which ends the current track's playback loop. */
+  private killPlayback() {
     this.currentGen++; // invalidates the in-flight playEntry loop
     try {
       this.ytdlpProc?.kill();
@@ -158,7 +231,6 @@ class DeifQueueStream {
     } catch {
       // already exited
     }
-    return { ok: true };
   }
 
   private wakeWaiters() {
@@ -181,6 +253,7 @@ class DeifQueueStream {
       const item = this.queue.shift()!;
       this.current = item;
       this.currentMetaString = `${item.artist} - ${item.title}`;
+      this.skipVotes.clear();
       const gen = ++this.currentGen;
       try {
         await this.playEntry(item, gen);

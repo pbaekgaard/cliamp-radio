@@ -87,9 +87,25 @@ export interface DeifQueueItem {
   addedAt: number;
 }
 
+export interface DeifSkipVoteState {
+  votes: number;
+  total: number;
+  hasVoted: boolean;
+}
+
 export interface DeifQueueState {
   nowPlaying: DeifQueueItem | null;
   queue: DeifQueueItem[];
+  listeners: string[];
+  skipVote: DeifSkipVoteState;
+}
+
+export interface DeifSkipResult {
+  ok: true;
+  skipped?: boolean;
+  votes?: number;
+  total?: number;
+  hasVoted?: boolean;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -156,5 +172,5 @@ export const api = {
   deifAddToQueue: (url: string) =>
     request<DeifQueueItem>("/api/deif/queue", { method: "POST", body: JSON.stringify({ url }) }),
   deifRemoveFromQueue: (id: number) => request(`/api/deif/queue/${id}`, { method: "DELETE" }),
-  deifSkipCurrent: () => request("/api/deif/queue/current/skip", { method: "POST" }),
+  deifSkipCurrent: () => request<DeifSkipResult>("/api/deif/queue/current/skip", { method: "POST" }),
 };

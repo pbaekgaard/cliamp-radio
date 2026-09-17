@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type PlaylistStreamStatus, type Station } from "../api";
-import { extractYouTubePlaylistId } from "../youtube";
+import { useRadioPlayer } from "../RadioPlayerContext";
+import { extractYouTubePlaylistId, tuneInUrlForTrack } from "../youtube";
 
 // Matches server/lib/stations.ts's HEADER_PLACEHOLDER_URL — the inert
 // divider entries injected between each station's tracks in the
@@ -41,6 +42,7 @@ export default function StationList() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
   const [playlistStatuses, setPlaylistStatuses] = useState<Record<string, PlaylistStreamStatus>>({});
+  const { nowPlaying, toggle } = useRadioPlayer();
 
   useEffect(() => {
     api.listStations().then(setStations).catch(() => {});
@@ -157,6 +159,8 @@ export default function StationList() {
               ? [...stationPlaylistIds].reduce((sum, id) => sum + (playlistStatuses[id]?.listeners ?? 0), 0)
               : counts[s.slug] || 0;
           const expanded = expandedSlug === s.slug;
+          const stationTuneInUrl = tracks.map((t) => tuneInUrlForTrack(t.path)).find((u): u is string => !!u) ?? null;
+          const stationIsPlaying = stationTuneInUrl !== null && nowPlaying?.url === stationTuneInUrl;
           return (
             <div className="station-config-wrap" key={s.slug}>
               <div
@@ -184,6 +188,17 @@ export default function StationList() {
                   </div>
                   <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
                 </div>
+                {stationTuneInUrl && (
+                  <button
+                    className="btn-primary tune-in-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle(stationTuneInUrl, s.name);
+                    }}
+                  >
+                    {stationIsPlaying ? "⏸ Playing" : "▶ Tune in"}
+                  </button>
+                )}
                 <button
                   className="btn-secondary"
                   onClick={(e) => {
@@ -205,15 +220,31 @@ export default function StationList() {
                       const playlistId = extractYouTubePlaylistId(t.path);
                       const status = playlistId ? playlistStatuses[playlistId] : undefined;
                       const listening = status?.listeners ?? 0;
+                      const trackTuneInUrl = tuneInUrlForTrack(t.path);
+                      const trackIsPlaying = trackTuneInUrl !== null && nowPlaying?.url === trackTuneInUrl;
                       return (
                         <li key={i} className="station-track-row">
                           <span className="station-track-title">{t.title}</span>
-                          {playlistId && (
-                            <span className={`station-listener-count track-listener-count${listening > 0 ? " live" : ""}`}>
-                              <span className={`live-dot${listening > 0 ? "" : " idle"}`} />
-                              {listening} listening
-                            </span>
-                          )}
+                          <span className="station-track-actions">
+                            {playlistId && (
+                              <span className={`station-listener-count track-listener-count${listening > 0 ? " live" : ""}`}>
+                                <span className={`live-dot${listening > 0 ? "" : " idle"}`} />
+                                {listening} listening
+                              </span>
+                            )}
+                            {trackTuneInUrl && (
+                              <button
+                                className="btn-secondary track-tune-in-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggle(trackTuneInUrl, `${s.name} — ${t.title}`);
+                                }}
+                                aria-label={trackIsPlaying ? "Pause" : "Tune in"}
+                              >
+                                {trackIsPlaying ? "⏸" : "▶"}
+                              </button>
+                            )}
+                          </span>
                         </li>
                       );
                     })}

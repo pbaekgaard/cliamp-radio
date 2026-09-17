@@ -1,9 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { DeifProvider } from "./DeifContext";
+import { RadioPlayerProvider } from "./RadioPlayerContext";
 import { UpdateProvider } from "./UpdateContext";
 import ChangePasswordModal from "./components/ChangePasswordModal";
 import ListenersGlobe from "./components/ListenersGlobe";
+import MiniPlayerBar from "./components/MiniPlayerBar";
 import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
@@ -38,6 +40,7 @@ function AppRoutes() {
           }
         />
       </Routes>
+      <MiniPlayerBar />
     </>
   );
 }
@@ -46,9 +49,11 @@ export default function App() {
   return (
     <AuthProvider>
       <DeifProvider>
-        <UpdateProvider>
-          <AppRoutes />
-        </UpdateProvider>
+        <RadioPlayerProvider>
+          <UpdateProvider>
+            <AppRoutes />
+          </UpdateProvider>
+        </RadioPlayerProvider>
       </DeifProvider>
     </AuthProvider>
   );

@@ -738,7 +738,7 @@ input {
 
 /* --- DEIF FM --- */
 .deif-page {
-  max-width: 720px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 32px 20px 60px;
 }
@@ -749,6 +749,67 @@ input {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 20px;
+}
+
+.deif-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.deif-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.deif-listeners-panel {
+  flex-shrink: 0;
+  width: 220px;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px 18px;
+  position: sticky;
+  top: 84px;
+}
+
+.deif-listeners-heading {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.deif-listeners-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.deif-listener-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.deif-vote-active {
+  background: rgba(124, 247, 196, 0.18);
+  color: var(--accent, #7cf7c4);
+}
+
+.deif-vote-hint {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 720px) {
+  .deif-layout {
+    flex-direction: column;
+  }
+  .deif-listeners-panel {
+    width: 100%;
+    position: static;
+  }
 }
 
 .deif-now-playing {
@@ -840,4 +901,52 @@ input {
 .deif-remove-btn {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+/* --- Tune in (browser radio player) --- */
+.tune-in-btn {
+  white-space: nowrap;
+}
+
+.station-track-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.track-tune-in-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.mini-player-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid rgba(124, 247, 196, 0.25);
+  border-radius: 999px;
+  padding: 10px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-width: calc(100vw - 32px);
+}
+
+.mini-player-icon {
+  font-size: 18px;
+}
+
+.mini-player-label {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40vw;
 }

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type DeifQueueItem, type DeifQueueState } from "../api";
 import { useDeif } from "../DeifContext";
+import { useRadioPlayer } from "../RadioPlayerContext";
 
 function timeAgo(ts: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -83,14 +84,36 @@ function QueueRow({
   );
 }
 
+function ListenersPanel({ listeners }: { listeners: string[] }) {
+  return (
+    <aside className="deif-listeners-panel">
+      <h2 className="deif-listeners-heading">Listeners ({listeners.length})</h2>
+      <ul className="deif-listeners-list">
+        {listeners.map((n) => (
+          <li key={n} className="deif-listener-row">
+            <span className="live-dot" />
+            {n}
+          </li>
+        ))}
+        {listeners.length === 0 && <li className="muted">Nobody else is on this page right now.</li>}
+      </ul>
+    </aside>
+  );
+}
+
 function QueuePanel() {
   const { name, forget } = useDeif();
-  const [state, setState] = useState<DeifQueueState>({ nowPlaying: null, queue: [] });
+  const [state, setState] = useState<DeifQueueState>({
+    nowPlaying: null,
+    queue: [],
+    listeners: [],
+    skipVote: { votes: 0, total: 1, hasVoted: false },
+  });
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
+  const { nowPlaying, toggle } = useRadioPlayer();
+  const playing = nowPlaying?.url === "/cliamp-radio/live/deif-fm.mp3";
 
   const poll = useCallback(async () => {
     try {
@@ -140,19 +163,8 @@ function QueuePanel() {
     }
   }
 
-  function togglePlayback() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (playing) {
-      audio.pause();
-      setPlaying(false);
-    } else {
-      audio.play().catch(() => {});
-      setPlaying(true);
-    }
-  }
-
   const isMineNowPlaying = state.nowPlaying && name && state.nowPlaying.addedBy.toLowerCase() === name.toLowerCase();
+  const majorityNeeded = Math.ceil(state.skipVote.total / 2);
 
   return (
     <div className="deif-page">
@@ -164,7 +176,7 @@ function QueuePanel() {
           </p>
         </div>
         <div className="header-actions">
-          <button className="btn-secondary" onClick={togglePlayback}>
+          <button className="btn-secondary" onClick={() => toggle("/cliamp-radio/live/deif-fm.mp3", "DEIF FM")}>
             {playing ? "Pause stream" : "▶ Listen live"}
           </button>
           <button className="btn-secondary" onClick={forget}>
@@ -172,55 +184,65 @@ function QueuePanel() {
           </button>
         </div>
       </div>
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={audioRef} src="/cliamp-radio/live/deif-fm.mp3" preload="none" />
 
-      <div className="deif-now-playing">
-        <p className="deif-now-playing-label">Now playing</p>
-        {state.nowPlaying ? (
-          <div className="deif-now-playing-card">
-            <div>
-              <div className="deif-now-playing-title">{state.nowPlaying.title}</div>
-              <div className="muted">{state.nowPlaying.artist}</div>
-              <div className="muted">
-                requested by <strong>{state.nowPlaying.addedBy}</strong>
+      <div className="deif-layout">
+        <div className="deif-main">
+          <div className="deif-now-playing">
+            <p className="deif-now-playing-label">Now playing</p>
+            {state.nowPlaying ? (
+              <div className="deif-now-playing-card">
+                <div>
+                  <div className="deif-now-playing-title">{state.nowPlaying.title}</div>
+                  <div className="muted">{state.nowPlaying.artist}</div>
+                  <div className="muted">
+                    requested by <strong>{state.nowPlaying.addedBy}</strong>
+                  </div>
+                </div>
+                <button
+                  className={`btn-secondary${state.skipVote.hasVoted ? " deif-vote-active" : ""}`}
+                  onClick={skip}
+                >
+                  {isMineNowPlaying
+                    ? "Skip"
+                    : state.skipVote.hasVoted
+                      ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                      : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
+                </button>
               </div>
-            </div>
-            {isMineNowPlaying && (
-              <button className="btn-secondary" onClick={skip}>
-                Skip
-              </button>
+            ) : (
+              <div className="deif-now-playing-card muted">Nothing playing yet — add a video below!</div>
+            )}
+            {state.nowPlaying && !isMineNowPlaying && (
+              <p className="muted deif-vote-hint">
+                Needs {majorityNeeded} of {state.skipVote.total} listening now to skip (a 50/50 split skips too).
+              </p>
             )}
           </div>
-        ) : (
-          <div className="deif-now-playing-card muted">Nothing playing yet — add a video below!</div>
-        )}
+
+          <form className="deif-add-form" onSubmit={addToQueue}>
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
+            <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
+              {submitting ? "Adding…" : "Add to queue"}
+            </button>
+          </form>
+          {error && <div className="error">{error}</div>}
+
+          <h2 className="deif-queue-heading">Up next ({state.queue.length})</h2>
+          <ul className="deif-queue-list">
+            {state.queue.map((item) => (
+              <QueueRow
+                key={item.id}
+                item={item}
+                isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
+                onRemove={remove}
+              />
+            ))}
+            {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}
+          </ul>
+        </div>
+
+        <ListenersPanel listeners={state.listeners} />
       </div>
-
-      <form className="deif-add-form" onSubmit={addToQueue}>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste a YouTube video link…"
-        />
-        <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
-          {submitting ? "Adding…" : "Add to queue"}
-        </button>
-      </form>
-      {error && <div className="error">{error}</div>}
-
-      <h2 className="deif-queue-heading">Up next ({state.queue.length})</h2>
-      <ul className="deif-queue-list">
-        {state.queue.map((item) => (
-          <QueueRow
-            key={item.id}
-            item={item}
-            isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
-            onRemove={remove}
-          />
-        ))}
-        {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}
-      </ul>
     </div>
   );
 }

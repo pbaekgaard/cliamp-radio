@@ -67,6 +67,33 @@ const server = Bun.serve({
       return new Response(stream, { headers });
     }
 
+    // --- On-demand single-video web-only "tune in" audio (public) ---
+    // Not referenced by any station's .m3u (cliamp desktop clients play
+    // plain video links directly themselves) — this exists purely so the
+    // website's "Tune in" buttons can play *any* track (playlist- or
+    // single-video-backed) straight in the browser, by lazily transcoding
+    // just that one video the same way playlist channels already are.
+    // Namespaced with a "video:" prefix in the shared stream map so it can
+    // never collide with a real playlist ID.
+    if (pathname.startsWith("/cliamp-radio/live/video/")) {
+      let videoId = decodeURIComponent(pathname.replace("/cliamp-radio/live/video/", "")).replace(/\/+$/, "");
+      if (videoId.endsWith(".mp3")) videoId = videoId.slice(0, -4);
+      if (!videoId || videoId.includes("/") || videoId === "." || videoId === "..") {
+        return new Response("Not found", { status: 404 });
+      }
+      const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const wantsMeta = req.headers.get("icy-metadata") === "1";
+      const stream = getOrCreatePlaylistStream(`video:${videoId}`, videoUrl).subscribe(wantsMeta);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "icy-name": "cliamp-radio",
+      };
+      if (wantsMeta) headers["icy-metaint"] = String(ICY_METAINT);
+      return new Response(stream, { headers });
+    }
+
     // --- Live playlist-stream audio (public) ---
     // Backs the URLs that renderM3U() rewrites YouTube-playlist tracks to: a
     // single always-on, shuffled-and-looping transcode of the playlist, so
@@ -205,7 +232,8 @@ const server = Bun.serve({
 
     // --- DEIF FM queue ---
     if (pathname === "/api/deif/queue" && req.method === "GET") {
-      return json(deifQueueStream.list());
+      const identity = getDeifIdentity(req);
+      return json(deifQueueStream.list(identity?.name));
     }
 
     if (pathname === "/api/deif/queue" && req.method === "POST") {
@@ -234,8 +262,8 @@ const server = Bun.serve({
     if (pathname === "/api/deif/queue/current/skip" && req.method === "POST") {
       const identity = getDeifIdentity(req);
       if (!identity) return unauthorized();
-      const result = deifQueueStream.skipCurrent(identity.name);
-      return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
+      const result = deifQueueStream.requestSkip(identity.name);
+      return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
     }
 
     // --- Stations CRUD ---
