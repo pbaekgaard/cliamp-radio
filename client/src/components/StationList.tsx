@@ -140,8 +140,22 @@ export default function StationList() {
       </div>
       <div className="station-config-items">
         {stations.map((s) => {
-          const n = counts[s.slug] || 0;
           const tracks = s.tracks.filter((t) => t.path !== HEADER_PLACEHOLDER_URL);
+          // Stations built (wholly or partly) from YouTube playlists get an
+          // accurate, real-time listener count by summing the live subscriber
+          // counts of their own playlist "channels" (below) rather than the
+          // heuristic IP/M3U-request-based count, which only reflects
+          // whoever fetched the .m3u and goes stale for hours after they
+          // actually stop listening. Stations with no playlist tracks (rare
+          // — just direct video/audio links) have no such signal available
+          // and fall back to that heuristic count.
+          const stationPlaylistIds = new Set(
+            tracks.map((t) => extractYouTubePlaylistId(t.path)).filter((id): id is string => !!id)
+          );
+          const n =
+            stationPlaylistIds.size > 0
+              ? [...stationPlaylistIds].reduce((sum, id) => sum + (playlistStatuses[id]?.listeners ?? 0), 0)
+              : counts[s.slug] || 0;
           const expanded = expandedSlug === s.slug;
           return (
             <div className="station-config-wrap" key={s.slug}>
