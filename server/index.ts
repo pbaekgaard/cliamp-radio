@@ -19,7 +19,7 @@ import {
   slugify,
   type Station,
 } from "./lib/stations";
-import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, stopAllPlaylistStreams } from "./lib/playlistStream";
+import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, prewarmAllPlaylistStreams, stopAllPlaylistStreams } from "./lib/playlistStream";
 
 const PORT = Number(process.env.PORT || 8000);
 const CLIENT_DIST = path.join(import.meta.dir, "..", "client", "dist");
@@ -158,6 +158,7 @@ const server = Bun.serve({
         return json({ error: `"${body.name}" is a reserved station name` }, { status: 400 });
       }
       const saved = await saveStation({ slug: slugify(body.name), name: body.name, tracks: body.tracks });
+      prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed after station create:", err));
       return json(saved, { status: 201 });
     }
 
@@ -182,6 +183,7 @@ const server = Bun.serve({
         }
         if (slugify(body.name) !== slug) await deleteStation(slug);
         const saved = await saveStation({ slug, name: body.name, tracks: body.tracks });
+        prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed after station update:", err));
         return json(saved);
       }
       if (req.method === "DELETE") {
@@ -238,6 +240,11 @@ const server = Bun.serve({
 });
 
 console.log(`cliamp-radio server listening on http://0.0.0.0:${PORT}`);
+
+// Pre-warm every YouTube-playlist station immediately so they're already
+// playing 24/7 (and buffered) instead of only starting — with a several
+// second yt-dlp/ffmpeg startup delay — the moment a first listener connects.
+prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed at startup:", err));
 
 function shutdown() {
   stopAllPlaylistStreams();

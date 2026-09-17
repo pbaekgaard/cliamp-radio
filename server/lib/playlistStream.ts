@@ -1,4 +1,5 @@
-import { parseArtistTitle } from "./youtube";
+import { extractYouTubePlaylistId, parseArtistTitle } from "./youtube";
+import { listStations } from "./stations";
 
 // ---------------------------------------------------------------------------
 // Turns a YouTube playlist URL into a single, always-live radio stream:
@@ -12,7 +13,7 @@ import { parseArtistTitle } from "./youtube";
 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
-const IDLE_STOP_MS = 5 * 60 * 1000; // stop transcoding this many ms after the last listener leaves
+const IDLE_STOP_MS = 60 * 60 * 1000; // stop transcoding this many ms after the last listener leaves (stations are meant to run 24/7 while anyone might be listening; this just saves CPU/bandwidth once nobody has been for a while)
 const PLAYLIST_REFRESH_MS = 6 * 60 * 60 * 1000; // re-fetch the playlist's video list at most this often
 const MAX_CONSECUTIVE_FAILURES = 5; // give up (rather than spin forever) after this many bad videos in a row
 
@@ -168,6 +169,21 @@ class PlaylistStream {
     });
   }
 
+  /**
+   * Starts (or keeps alive) this station without a listener attached — used
+   * to pre-warm every configured playlist at server boot so stations are
+   * already transcoding and buffered (no ~8s yt-dlp/ffmpeg startup delay)
+   * by the time the first real listener tunes in, and so the stream is
+   * genuinely playing 24/7 rather than only while someone is connected.
+   * Still subject to the same idle-stop timer as a real listener leaving:
+   * if nobody tunes in for IDLE_STOP_MS, it's torn down to save resources.
+   */
+  prewarm() {
+    this.cancelIdleStop();
+    this.ensureRunning();
+    if (this.subscribers.size === 0) this.scheduleIdleStop();
+  }
+
   private ensureRunning() {
     if (this.running) return;
     this.running = true;
@@ -181,8 +197,10 @@ class PlaylistStream {
     let consecutiveFailures = 0;
     try {
       while (this.generation === gen) {
-        if (this.subscribers.size === 0) break; // ensureRunning() restarts this when someone next tunes in
-
+        // Keep playing even with zero subscribers (broadcast() is then a
+        // no-op) so the station stays live 24/7 for anyone who tunes in;
+        // scheduleIdleStop() is what actually tears this down after a real
+        // stretch of no listeners, not the mere absence of one right now.
         await this.refreshEntriesIfNeeded();
         if (this.entries.length === 0) {
           console.error(`[playlist-stream:${this.playlistId}] no playable videos found in playlist`);
@@ -398,4 +416,26 @@ export function getPlaylistStreamStatus(playlistId: string) {
 /** Kills every running yt-dlp/ffmpeg pair — called on process shutdown. */
 export function stopAllPlaylistStreams() {
   for (const stream of streams.values()) stream.stop();
+}
+
+/**
+ * Starts every YouTube-playlist station already saved (across all
+ * stations' tracks) transcoding immediately, so they're playing 24/7 from
+ * server boot instead of only spinning up — with the ~8s yt-dlp/ffmpeg
+ * startup delay — the moment a first listener happens to tune in. Safe to
+ * call repeatedly (e.g. after saving a new station); already-running or
+ * already-idle-scheduled streams are left alone.
+ */
+export async function prewarmAllPlaylistStreams() {
+  const stations = await listStations();
+  const seen = new Set<string>();
+  for (const station of stations) {
+    for (const track of station.tracks) {
+      const playlistId = extractYouTubePlaylistId(track.path);
+      if (!playlistId || seen.has(playlistId)) continue;
+      seen.add(playlistId);
+      const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
+      getOrCreatePlaylistStream(playlistId, playlistUrl).prewarm();
+    }
+  }
 }
