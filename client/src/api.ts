@@ -85,6 +85,7 @@ export interface DeifQueueItem {
   title: string;
   addedBy: string;
   addedAt: number;
+  source: "youtube" | "upload";
 }
 
 export interface DeifSkipVoteState {
@@ -171,6 +172,16 @@ export const api = {
   deifQueue: () => request<DeifQueueState>("/api/deif/queue"),
   deifAddToQueue: (url: string) =>
     request<DeifQueueItem>("/api/deif/queue", { method: "POST", body: JSON.stringify({ url }) }),
+  deifUploadToQueue: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/deif/queue/upload", { method: "POST", credentials: "include", body: formData });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `Request failed: ${res.status}`);
+    }
+    return res.json() as Promise<DeifQueueItem>;
+  },
   deifRemoveFromQueue: (id: number) => request(`/api/deif/queue/${id}`, { method: "DELETE" }),
   deifSkipCurrent: () => request<DeifSkipResult>("/api/deif/queue/current/skip", { method: "POST" }),
 };

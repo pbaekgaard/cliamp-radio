@@ -1,3 +1,5 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
@@ -15,6 +17,8 @@ import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
+const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "deif-uploads");
+const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 // A "listener" is anyone whose /deif page has polled the queue within this
 // window (see index.ts, which touches presence on every GET /api/deif/queue
 // — the page already polls every few seconds, so this doubles as a
@@ -30,6 +34,9 @@ export interface QueueItem {
   title: string;
   addedBy: string;
   addedAt: number;
+  /** "youtube" (default) plays via yt-dlp; "upload" plays a locally-stored
+   * mp3 (see uploadFiles below) that's deleted once it's done playing. */
+  source: "youtube" | "upload";
 }
 
 interface Subscriber {
@@ -73,6 +80,15 @@ async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: s
   return { title: rawTitle.trim(), uploader: uploader?.trim() || null };
 }
 
+/** Best-effort {artist, title} guess from an uploaded file's name, mirroring
+ * parseArtistTitle()'s "Artist - Title" convention for YouTube titles. */
+function titleFromFilename(filename: string): { artist: string; title: string } {
+  const base = filename.replace(/\.[^./]+$/, "").replace(/[_]+/g, " ").trim();
+  const idx = base.indexOf(" - ");
+  if (idx > 0) return { artist: base.slice(0, idx).trim(), title: base.slice(idx + 3).trim() };
+  return { artist: "Uploaded", title: base || "Untitled upload" };
+}
+
 class DeifQueueStream {
   private subscribers = new Set<Subscriber>();
   private queue: QueueItem[] = [];
@@ -86,6 +102,7 @@ class DeifQueueStream {
   private ffmpegProc: ReturnType<typeof Bun.spawn> | null = null;
   private presence = new Map<string, number>(); // name -> last-seen timestamp
   private skipVotes = new Set<string>(); // names who voted to skip the current track
+  private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
 
   get status() {
     return {
@@ -163,11 +180,62 @@ class DeifQueueStream {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     const info = await fetchVideoInfo(videoUrl);
     const { artist, title } = parseArtistTitle(info.title, info.uploader);
-    const item: QueueItem = { id: this.nextId++, videoId, url: videoUrl, artist, title, addedBy, addedAt: Date.now() };
+    const item: QueueItem = {
+      id: this.nextId++,
+      videoId,
+      url: videoUrl,
+      artist,
+      title,
+      addedBy,
+      addedAt: Date.now(),
+      source: "youtube",
+    };
     this.queue.push(item);
     this.wakeWaiters();
     this.start();
     return item;
+  }
+
+  /**
+   * Saves an uploaded mp3 to disk and adds it to the queue. The file is
+   * deleted once it's done playing (see loop()) or if it's removed from
+   * the queue before its turn (see removeFromQueue()) — uploads never
+   * linger on disk longer than they need to.
+   */
+  async addUploadToQueue(file: File, addedBy: string): Promise<QueueItem> {
+    if (this.queue.length >= MAX_QUEUE_LENGTH) throw new Error("the queue is full — try again once it's shorter");
+    const name = file.name || "upload.mp3";
+    const looksLikeMp3 = /\.mp3$/i.test(name) || file.type === "audio/mpeg" || file.type === "audio/mp3";
+    if (!looksLikeMp3) throw new Error("only .mp3 files are supported");
+    if (file.size <= 0) throw new Error("that file looks empty");
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`that file is too big (max ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB)`);
+    }
+
+    await mkdir(UPLOADS_DIR, { recursive: true });
+    const id = this.nextId++;
+    const diskPath = path.join(UPLOADS_DIR, `${id}-${crypto.randomUUID()}.mp3`);
+    await writeFile(diskPath, new Uint8Array(await file.arrayBuffer()));
+    this.uploadFiles.set(id, diskPath);
+
+    const { artist, title } = titleFromFilename(name);
+    const item: QueueItem = { id, videoId: "", url: "", artist, title, addedBy, addedAt: Date.now(), source: "upload" };
+    this.queue.push(item);
+    this.wakeWaiters();
+    this.start();
+    return item;
+  }
+
+  /** Deletes an uploaded mp3's on-disk file, if any; a no-op for YouTube entries. */
+  private async cleanupUpload(id: number) {
+    const filePath = this.uploadFiles.get(id);
+    if (!filePath) return;
+    this.uploadFiles.delete(id);
+    try {
+      await rm(filePath, { force: true });
+    } catch (err) {
+      console.error(`[deif-queue] failed to delete uploaded file ${filePath}:`, err);
+    }
   }
 
   /** Removes a not-yet-played entry; only the person who added it may remove it. */
@@ -177,7 +245,8 @@ class DeifQueueStream {
     if (this.queue[idx]!.addedBy.toLowerCase() !== requestedBy.toLowerCase()) {
       return { ok: false, error: "you can only remove entries you added" };
     }
-    this.queue.splice(idx, 1);
+    const [removed] = this.queue.splice(idx, 1);
+    if (removed?.source === "upload") this.cleanupUpload(removed.id).catch(() => {});
     return { ok: true };
   }
 
@@ -258,12 +327,16 @@ class DeifQueueStream {
       try {
         await this.playEntry(item, gen);
       } catch (err) {
-        console.error(`[deif-queue] failed to play ${item.url}:`, err);
+        console.error(`[deif-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
+      } finally {
+        if (item.source === "upload") this.cleanupUpload(item.id).catch(() => {});
       }
     }
   }
 
   private async playEntry(entry: QueueItem, gen: number): Promise<void> {
+    if (entry.source === "upload") return this.playUpload(entry, gen);
+
     const ytdlp = Bun.spawn(
       ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
       { stdout: "pipe", stderr: "pipe" }
@@ -307,6 +380,43 @@ class DeifQueueStream {
       } catch {
         // already exited
       }
+      try {
+        ffmpeg.kill();
+      } catch {
+        // already exited
+      }
+    }
+  }
+
+  /** Plays a locally-uploaded mp3 straight through ffmpeg (no yt-dlp needed). */
+  private async playUpload(entry: QueueItem, gen: number): Promise<void> {
+    const filePath = this.uploadFiles.get(entry.id);
+    if (!filePath) throw new Error("uploaded file is missing");
+
+    // `-re` paces output to real playback speed, same as the YouTube path.
+    const ffmpeg = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-i", filePath, "-vn", ...AUDIO_ARGS, "pipe:1"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    this.ytdlpProc = null;
+    this.ffmpegProc = ffmpeg;
+    const ffmpegStderr = drainText(ffmpeg.stderr);
+
+    try {
+      const reader = ffmpeg.stdout.getReader();
+      while (true) {
+        if (this.currentGen !== gen) return; // skipped mid-track
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) this.broadcast(value);
+      }
+      const ffExit = await ffmpeg.exited;
+      if (ffExit !== 0 && this.currentGen === gen) {
+        const ffErr = (await ffmpegStderr).trim();
+        throw new Error(`ffmpeg exited with code ${ffExit}` + (ffErr ? `\nffmpeg stderr: ${ffErr}` : ""));
+      }
+    } finally {
+      this.ffmpegProc = null;
       try {
         ffmpeg.kill();
       } catch {

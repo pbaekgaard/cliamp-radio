@@ -251,6 +251,20 @@ const server = Bun.serve({
       }
     }
 
+    if (pathname === "/api/deif/queue/upload" && req.method === "POST") {
+      const identity = getDeifIdentity(req);
+      if (!identity) return unauthorized();
+      const formData = await req.formData().catch(() => null);
+      const file = formData?.get("file");
+      if (!(file instanceof File)) return json({ error: "an mp3 file is required" }, { status: 400 });
+      try {
+        const item = await deifQueueStream.addUploadToQueue(file, identity.name);
+        return json(item, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to upload" }, { status: 400 });
+      }
+    }
+
     const deifQueueItemMatch = pathname.match(/^\/api\/deif\/queue\/(\d+)$/);
     if (deifQueueItemMatch && req.method === "DELETE") {
       const identity = getDeifIdentity(req);

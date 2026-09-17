@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type DeifQueueItem, type DeifQueueState } from "../api";
 import { useDeif } from "../DeifContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
@@ -68,7 +68,10 @@ function QueueRow({
     <li className="deif-queue-row">
       <div className="deif-queue-row-info">
         <span className="deif-queue-title">{item.title}</span>
-        <span className="deif-queue-artist">{item.artist}</span>
+        <span className="deif-queue-artist">
+          {item.artist}
+          {item.source === "upload" && <span className="deif-upload-badge"> · uploaded</span>}
+        </span>
       </div>
       <div className="deif-queue-row-meta">
         <span className="muted">
@@ -112,6 +115,9 @@ function QueuePanel() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { nowPlaying, toggle } = useRadioPlayer();
   const playing = nowPlaying?.url === "/cliamp-radio/live/deif-fm.mp3";
 
@@ -151,6 +157,22 @@ function QueuePanel() {
       poll();
     } catch {
       // best-effort — the next poll will resync state if this failed silently
+    }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await api.deifUploadToQueue(file);
+      poll();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -226,6 +248,22 @@ function QueuePanel() {
             </button>
           </form>
           {error && <div className="error">{error}</div>}
+
+          <div className="deif-upload-row">
+            <label className="btn-secondary deif-upload-label">
+              {uploading ? "Uploading…" : "Upload an MP3"}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/mpeg,.mp3"
+                onChange={handleFileChange}
+                disabled={uploading}
+                hidden
+              />
+            </label>
+            <span className="muted">One file at a time — it's deleted once it's done playing.</span>
+          </div>
+          {uploadError && <div className="error">{uploadError}</div>}
 
           <h2 className="deif-queue-heading">Up next ({state.queue.length})</h2>
           <ul className="deif-queue-list">
