@@ -79,6 +79,19 @@ const server = Bun.serve({
       return json(getPlaylistStreamStatus(decodeURIComponent(nowPlayingMatch[1]!)));
     }
 
+    // --- Batch playlist-stream status (used by the station list UI to show
+    // a live listener count per YouTube-playlist "channel" without firing
+    // one request per playlist) ---
+    if (pathname === "/api/playlist-stream/status" && req.method === "GET") {
+      const ids = (url.searchParams.get("ids") || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      const result: Record<string, ReturnType<typeof getPlaylistStreamStatus>> = {};
+      for (const id of ids) result[id] = getPlaylistStreamStatus(id);
+      return json(result);
+    }
+
     // --- Station M3U streaming (public) ---
     if (pathname.startsWith("/cliamp-radio/")) {
       let slug = decodeURIComponent(pathname.replace("/cliamp-radio/", "")).replace(/\/+$/, "");

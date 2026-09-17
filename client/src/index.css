@@ -275,22 +275,41 @@ body,
 }
 
 .station-track-list {
-  list-style: disc;
+  list-style: none;
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
-.station-track-list li {
-  display: list-item;
+.station-track-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 13px;
   color: var(--muted);
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.station-track-row:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .station-track-title {
   color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-listener-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px 2px 7px;
 }
 
 /* --- Stats side panel --- */

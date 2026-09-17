@@ -71,6 +71,12 @@ export interface StatsResponse {
   allTime: AllTimeStats;
 }
 
+export interface PlaylistStreamStatus {
+  running: boolean;
+  listeners: number;
+  nowPlaying: { artist: string; title: string } | null;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -107,6 +113,12 @@ export const api = {
 
   listeners: () => request<Listener[]>("/api/listeners"),
   stats: () => request<StatsResponse>("/api/stats"),
+  playlistStreamStatuses: (playlistIds: string[]) =>
+    playlistIds.length === 0
+      ? Promise.resolve({} as Record<string, PlaylistStreamStatus>)
+      : request<Record<string, PlaylistStreamStatus>>(
+          `/api/playlist-stream/status?ids=${playlistIds.map(encodeURIComponent).join(",")}`
+        ),
 
   updateCheck: () => request<UpdateStatus>("/api/update/check"),
   version: () => request<{ version: string }>("/api/version"),

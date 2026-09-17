@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type Station } from "../api";
+import { api, type PlaylistStreamStatus, type Station } from "../api";
+import { extractYouTubePlaylistId } from "../youtube";
 
 // Matches server/lib/stations.ts's HEADER_PLACEHOLDER_URL — the inert
 // divider entries injected between each station's tracks in the
@@ -39,6 +40,7 @@ export default function StationList() {
   const [copiedAll, setCopiedAll] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
+  const [playlistStatuses, setPlaylistStatuses] = useState<Record<string, PlaylistStreamStatus>>({});
 
   useEffect(() => {
     api.listStations().then(setStations).catch(() => {});
@@ -64,6 +66,37 @@ export default function StationList() {
       clearInterval(id);
     };
   }, []);
+
+  const playlistIds = Array.from(
+    new Set(
+      stations.flatMap((s) => s.tracks.map((t) => extractYouTubePlaylistId(t.path)).filter((id): id is string => !!id))
+    )
+  ).sort();
+  const playlistIdsKey = playlistIds.join(",");
+
+  useEffect(() => {
+    if (playlistIds.length === 0) {
+      setPlaylistStatuses({});
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      try {
+        const statuses = await api.playlistStreamStatuses(playlistIds);
+        if (!cancelled) setPlaylistStatuses(statuses);
+      } catch {
+        // ignore transient network errors
+      }
+    }
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // Intentionally keyed on playlistIdsKey (a stable string) rather than
+    // the `playlistIds` array itself, which is a new reference every render.
+  }, [playlistIdsKey]);
 
   async function copyText(text: string) {
     try {
@@ -154,11 +187,22 @@ export default function StationList() {
                 <div className="station-track-panel">
                   <p className="station-track-header">Channels:</p>
                   <ul className="station-track-list">
-                    {tracks.map((t, i) => (
-                      <li key={i}>
-                        <span className="station-track-title">{t.title}</span>
-                      </li>
-                    ))}
+                    {tracks.map((t, i) => {
+                      const playlistId = extractYouTubePlaylistId(t.path);
+                      const status = playlistId ? playlistStatuses[playlistId] : undefined;
+                      const listening = status?.listeners ?? 0;
+                      return (
+                        <li key={i} className="station-track-row">
+                          <span className="station-track-title">{t.title}</span>
+                          {playlistId && (
+                            <span className={`station-listener-count track-listener-count${listening > 0 ? " live" : ""}`}>
+                              <span className={`live-dot${listening > 0 ? "" : " idle"}`} />
+                              {listening} listening
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
                     {tracks.length === 0 && <li className="muted">No tracks yet.</li>}
                   </ul>
                 </div>
