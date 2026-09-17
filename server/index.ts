@@ -345,7 +345,7 @@ const server = Bun.serve({
 
     // --- Update checker ---
     if (pathname === "/api/update/check" && req.method === "GET") {
-      return json(await checkForUpdate());
+      return json(await checkForUpdate(url.searchParams.get("force") === "1"));
     }
 
     if (pathname === "/api/update/install" && req.method === "POST") {

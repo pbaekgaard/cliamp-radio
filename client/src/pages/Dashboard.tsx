@@ -21,7 +21,7 @@ export default function Dashboard() {
 
   async function checkUpdatesNow() {
     setUpdateMessage(null);
-    const res = await checkNow();
+    const res = await checkNow(true);
     if (!res) {
       setUpdateMessage("Couldn't reach GitHub to check for updates.");
     } else if (res.updateAvailable) {

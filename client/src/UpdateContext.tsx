@@ -5,8 +5,11 @@ interface UpdateContextValue {
   status: UpdateStatus | null;
   checking: boolean;
   lastChecked: Date | null;
-  /** Runs an update check immediately, regardless of the background poll timer. */
-  checkNow: () => Promise<UpdateStatus | null>;
+  /** Runs an update check immediately, regardless of the background poll timer.
+   * `force` bypasses the server's 5-minute cache too, for when a human
+   * explicitly clicks "Check for updates" and expects a live answer instead
+   * of a possibly-stale cached one. */
+  checkNow: (force?: boolean) => Promise<UpdateStatus | null>;
   /** Bumped whenever something wants the update modal to pop open (e.g. "Check for updates" finding one). */
   openRequestId: number;
   requestOpen: () => void;
@@ -25,12 +28,12 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   const requestOpen = useCallback(() => setOpenRequestId((n) => n + 1), []);
 
-  const checkNow = useCallback(async () => {
+  const checkNow = useCallback(async (force = false) => {
     if (checkingRef.current) return status;
     checkingRef.current = true;
     setChecking(true);
     try {
-      const res = await api.updateCheck();
+      const res = await api.updateCheck(force);
       setStatus(res);
       setLastChecked(new Date());
       return res;

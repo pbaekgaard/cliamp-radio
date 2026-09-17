@@ -152,7 +152,7 @@ export const api = {
           `/api/playlist-stream/status?ids=${playlistIds.map(encodeURIComponent).join(",")}`
         ),
 
-  updateCheck: () => request<UpdateStatus>("/api/update/check"),
+  updateCheck: (force = false) => request<UpdateStatus>(`/api/update/check${force ? "?force=1" : ""}`),
   version: () => request<{ version: string }>("/api/version"),
   // Deliberately doesn't use request(): we want the log/output even when the
   // update script fails (non-2xx), instead of throwing it away.

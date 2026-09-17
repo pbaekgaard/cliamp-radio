@@ -158,9 +158,9 @@ async function fetchLatestReleaseFresh(): Promise<{ release: ReleaseInfo | null;
  * Silently reporting "no update" in that case would be indistinguishable
  * from actually being up to date, so callers need this signal.
  */
-async function fetchLatestRelease(): Promise<{ release: ReleaseInfo | null; error: boolean }> {
+async function fetchLatestRelease(force = false): Promise<{ release: ReleaseInfo | null; error: boolean }> {
   const now = Date.now();
-  if (cachedRelease && now - cachedAt < CACHE_MS) return { release: cachedRelease, error: false };
+  if (!force && cachedRelease && now - cachedAt < CACHE_MS) return { release: cachedRelease, error: false };
 
   const fresh = await fetchLatestReleaseFresh();
   if (fresh.release) {
@@ -181,8 +181,8 @@ function normalizeTag(tag: string): string {
   return tag.replace(/^v/, "");
 }
 
-export async function checkForUpdate() {
-  const { release: latest, error } = await fetchLatestRelease();
+export async function checkForUpdate(force = false) {
+  const { release: latest, error } = await fetchLatestRelease(force);
   const current = getCurrentVersion();
   if (!latest) {
     return { current, updateAvailable: false, latest: null, checkFailed: error };
