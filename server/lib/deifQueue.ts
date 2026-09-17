@@ -19,12 +19,13 @@ const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "deif-uploads");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
-// A "listener" is anyone whose /deif page has polled the queue within this
-// window (see index.ts, which touches presence on every GET /api/deif/queue
-// — the page already polls every few seconds, so this doubles as a
-// heartbeat with no extra requests). Used both for the listeners list and
-// as the denominator for the skip-vote majority below.
-const PRESENCE_TTL_MS = 20_000;
+// A "listener" is someone whose browser currently has an open connection to
+// the actual /cliamp-radio/live/deif-fm.mp3 audio stream (i.e. they clicked
+// "Listen live" and are still playing it) — see subscribe() below. Merely
+// having the /deif page open (which polls the queue for now-playing/queue
+// updates) does *not* count; that would inflate the count with people who
+// are just browsing the page without actually listening. Used both for the
+// listeners list and as the denominator for the skip-vote majority below.
 
 export interface QueueItem {
   id: number;
@@ -44,6 +45,8 @@ interface Subscriber {
   wantsMeta: boolean;
   bytesSinceMeta: number;
   lastSentMeta: string;
+  /** The listener's DEIF display name, if they'd identified themselves before tuning in. */
+  name?: string;
 }
 
 function encodeIcyMeta(nowPlaying: string): Uint8Array {
@@ -100,14 +103,13 @@ class DeifQueueStream {
   private waiters: Array<() => void> = [];
   private ytdlpProc: ReturnType<typeof Bun.spawn> | null = null;
   private ffmpegProc: ReturnType<typeof Bun.spawn> | null = null;
-  private presence = new Map<string, number>(); // name -> last-seen timestamp
   private skipVotes = new Set<string>(); // names who voted to skip the current track
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
 
   get status() {
     return {
       running: this.current !== null,
-      listeners: this.subscribers.size,
+      listeners: this.listenerNames().length,
       nowPlaying: this.current
         ? { id: this.current.id, artist: this.current.artist, title: this.current.title, addedBy: this.current.addedBy }
         : null,
@@ -115,20 +117,15 @@ class DeifQueueStream {
     };
   }
 
-  /** Records that `name` is actively viewing the DEIF FM page right now. */
-  touchPresence(name: string) {
-    this.presence.set(name, Date.now());
-  }
-
-  /** Names seen within PRESENCE_TTL_MS, sorted; also prunes stale entries. */
-  private activeListenerNames(): string[] {
-    const now = Date.now();
-    const names: string[] = [];
-    for (const [name, lastSeen] of this.presence) {
-      if (now - lastSeen <= PRESENCE_TTL_MS) names.push(name);
-      else this.presence.delete(name);
+  /** Distinct display names of everyone currently connected to the actual audio
+   * stream (subscribers with a name), sorted. Anonymous stream connections
+   * (nobody identified yet) are still played to, just not named here. */
+  private listenerNames(): string[] {
+    const names = new Set<string>();
+    for (const sub of this.subscribers) {
+      if (sub.name) names.add(sub.name);
     }
-    return names.sort((a, b) => a.localeCompare(b));
+    return [...names].sort((a, b) => a.localeCompare(b));
   }
 
   list(viewerName?: string): {
@@ -137,8 +134,7 @@ class DeifQueueStream {
     listeners: string[];
     skipVote: { votes: number; total: number; hasVoted: boolean };
   } {
-    if (viewerName) this.touchPresence(viewerName);
-    const listeners = this.activeListenerNames();
+    const listeners = this.listenerNames();
     return {
       nowPlaying: this.current,
       queue: [...this.queue],
@@ -158,12 +154,16 @@ class DeifQueueStream {
     this.loop().catch((err) => console.error("[deif-queue] loop crashed:", err));
   }
 
-  subscribe(wantsMeta: boolean): ReadableStream<Uint8Array> {
+  /** `name` is the listener's DEIF display name (if identified) — passed in
+   * from the request's identity cookie in index.ts so the listeners list
+   * only reflects people actually tuned into the audio stream, not just
+   * anyone with the /deif page open. */
+  subscribe(wantsMeta: boolean, name?: string): ReadableStream<Uint8Array> {
     const self = this;
     let sub: Subscriber;
     return new ReadableStream<Uint8Array>({
       start(controller) {
-        sub = { controller, wantsMeta, bytesSinceMeta: 0, lastSentMeta: "" };
+        sub = { controller, wantsMeta, bytesSinceMeta: 0, lastSentMeta: "", name };
         self.subscribers.add(sub);
       },
       cancel() {
@@ -277,7 +277,7 @@ class DeifQueueStream {
     if (this.skipVotes.has(name)) this.skipVotes.delete(name);
     else this.skipVotes.add(name);
 
-    const total = Math.max(this.activeListenerNames().length, 1);
+    const total = Math.max(this.listenerNames().length, 1);
     const votes = this.skipVotes.size;
     if (votes * 2 >= total) {
       this.skipVotes.clear();

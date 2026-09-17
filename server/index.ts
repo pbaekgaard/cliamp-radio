@@ -57,7 +57,8 @@ const server = Bun.serve({
     // to: the always-on, queue-driven stream (see lib/deifQueue.ts).
     if (pathname === "/cliamp-radio/live/deif-fm.mp3") {
       const wantsMeta = req.headers.get("icy-metadata") === "1";
-      const stream = deifQueueStream.subscribe(wantsMeta);
+      const identity = getDeifIdentity(req);
+      const stream = deifQueueStream.subscribe(wantsMeta, identity?.name);
       const headers: Record<string, string> = {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-cache, no-store, must-revalidate",
