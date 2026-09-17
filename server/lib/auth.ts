@@ -1,21 +1,50 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const CREDENTIALS_DIR = path.join(import.meta.dir, "..", "data");
+const JWT_SECRET_PATH = path.join(CREDENTIALS_DIR, "jwt-secret.txt");
+
+// Session-signing secret. There is deliberately NO hardcoded fallback value
+// here (a shared, public default baked into the repo would let anyone who's
+// ever read this source forge admin session cookies against any deployment
+// that forgot to override it). Instead:
+//   1. JWT_SECRET env var, if set — lets you pin/rotate/share a secret
+//      explicitly (e.g. across multiple instances behind a load balancer).
+//   2. Otherwise, a random 384-bit secret is generated on first boot and
+//      persisted to server/data/jwt-secret.txt (gitignored, mode 0600, never
+//      touched by `git pull`/updates) so it survives restarts but a fresh
+//      one is generated per-deployment automatically — no manual step, and
+//      nothing secret ever lives in this repo.
+function loadOrCreateJwtSecret(): string {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (existsSync(JWT_SECRET_PATH)) {
+    const existing = readFileSync(JWT_SECRET_PATH, "utf-8").trim();
+    if (existing) return existing;
+  }
+  mkdirSync(CREDENTIALS_DIR, { recursive: true });
+  const secret = randomBytes(48).toString("hex");
+  writeFileSync(JWT_SECRET_PATH, secret, { mode: 0o600 });
+  return secret;
+}
+
+const JWT_SECRET = loadOrCreateJwtSecret();
+export { JWT_SECRET };
 
 // Admin credentials persist here — deliberately NOT in the JWT secret / env
 // vars and gitignored, so a `git pull`/update never resets a password you've
 // already changed. Only the very first boot (no file yet) falls back to
 // ADMIN_USERNAME/ADMIN_PASSWORD_HASH env vars or the "changeme" default.
-const CREDENTIALS_DIR = path.join(import.meta.dir, "..", "data");
 const CREDENTIALS_PATH = path.join(CREDENTIALS_DIR, "admin-credentials.json");
 
 // bcrypt hash of "changeme"
 const DEFAULT_PASSWORD_HASH = "$2b$10$eOIWRVvKVMQi83EclQLOYubhFTl54TdHnMJLO4pvpMrDqV77FnYcm";
 
 export const SESSION_COOKIE = "cliamp_session";
+
 
 interface Credentials {
   username: string;

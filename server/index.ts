@@ -7,10 +7,13 @@ import {
   SESSION_COOKIE,
   verifyCredentials,
 } from "./lib/auth";
+import { createDeifSessionToken, DEIF_SESSION_COOKIE, getDeifIdentity, normalizeDeifName } from "./lib/deifIdentity";
+import { deifQueueStream, ICY_METAINT as DEIF_ICY_METAINT } from "./lib/deifQueue";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
   deleteStation,
+  ensureDeifStation,
   getStation,
   isReservedSlug,
   listStations,
@@ -48,6 +51,21 @@ const server = Bun.serve({
   async fetch(req, srv) {
     const url = new URL(req.url);
     const { pathname } = url;
+
+    // --- DEIF FM audio (public) ---
+    // Backs the URL that renderM3U() rewrites the DEIF_QUEUE_MARKER track
+    // to: the always-on, queue-driven stream (see lib/deifQueue.ts).
+    if (pathname === "/cliamp-radio/live/deif-fm.mp3") {
+      const wantsMeta = req.headers.get("icy-metadata") === "1";
+      const stream = deifQueueStream.subscribe(wantsMeta);
+      const headers: Record<string, string> = {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "icy-name": "DEIF FM",
+      };
+      if (wantsMeta) headers["icy-metaint"] = String(DEIF_ICY_METAINT);
+      return new Response(stream, { headers });
+    }
 
     // --- Live playlist-stream audio (public) ---
     // Backs the URLs that renderM3U() rewrites YouTube-playlist tracks to: a
@@ -156,6 +174,70 @@ const server = Bun.serve({
       return json({ ok: true });
     }
 
+    // --- DEIF FM identity (name-only "login", no password/account) ---
+    if (pathname === "/api/deif/identify" && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      const name = typeof body?.name === "string" ? normalizeDeifName(body.name) : null;
+      if (!name) return json({ error: "a name (1-24 characters) is required" }, { status: 400 });
+      const token = createDeifSessionToken(name);
+      return json(
+        { name },
+        {
+          headers: {
+            "Set-Cookie": `${DEIF_SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`,
+          },
+        }
+      );
+    }
+
+    if (pathname === "/api/deif/me" && req.method === "GET") {
+      const identity = getDeifIdentity(req);
+      if (!identity) return unauthorized();
+      return json({ name: identity.name });
+    }
+
+    if (pathname === "/api/deif/logout" && req.method === "POST") {
+      return json(
+        { ok: true },
+        { headers: { "Set-Cookie": `${DEIF_SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0` } }
+      );
+    }
+
+    // --- DEIF FM queue ---
+    if (pathname === "/api/deif/queue" && req.method === "GET") {
+      return json(deifQueueStream.list());
+    }
+
+    if (pathname === "/api/deif/queue" && req.method === "POST") {
+      const identity = getDeifIdentity(req);
+      if (!identity) return unauthorized();
+      const body = await req.json().catch(() => null);
+      if (typeof body?.url !== "string" || !body.url.trim()) {
+        return json({ error: "url required" }, { status: 400 });
+      }
+      try {
+        const item = await deifQueueStream.addToQueue(body.url.trim(), identity.name);
+        return json(item, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to add to queue" }, { status: 400 });
+      }
+    }
+
+    const deifQueueItemMatch = pathname.match(/^\/api\/deif\/queue\/(\d+)$/);
+    if (deifQueueItemMatch && req.method === "DELETE") {
+      const identity = getDeifIdentity(req);
+      if (!identity) return unauthorized();
+      const result = deifQueueStream.removeFromQueue(Number(deifQueueItemMatch[1]), identity.name);
+      return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
+    }
+
+    if (pathname === "/api/deif/queue/current/skip" && req.method === "POST") {
+      const identity = getDeifIdentity(req);
+      if (!identity) return unauthorized();
+      const result = deifQueueStream.skipCurrent(identity.name);
+      return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
+    }
+
     // --- Stations CRUD ---
     if (pathname === "/api/stations" && req.method === "GET") {
       return json(await listStations());
@@ -259,8 +341,16 @@ console.log(`cliamp-radio server listening on http://0.0.0.0:${PORT}`);
 // second yt-dlp/ffmpeg startup delay — the moment a first listener connects.
 prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed at startup:", err));
 
+// Ensure the "DEIF RADIO" station (with its DEIF FM queue channel) exists,
+// and start the queue's playback loop so it's ready the instant the first
+// video is queued.
+ensureDeifStation()
+  .then(() => deifQueueStream.start())
+  .catch((err) => console.error("[deif] failed to set up DEIF RADIO station:", err));
+
 function shutdown() {
   stopAllPlaylistStreams();
+  deifQueueStream.stop();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

@@ -1,4 +1,4 @@
-import { extractYouTubePlaylistId, parseArtistTitle } from "./youtube";
+import { drainText, extractYouTubePlaylistId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 import { listStations } from "./stations";
 
 // ---------------------------------------------------------------------------
@@ -16,39 +16,6 @@ const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const IDLE_STOP_MS = 60 * 60 * 1000; // stop transcoding this many ms after the last listener leaves (stations are meant to run 24/7 while anyone might be listening; this just saves CPU/bandwidth once nobody has been for a while)
 const PLAYLIST_REFRESH_MS = 6 * 60 * 60 * 1000; // re-fetch the playlist's video list at most this often
 const MAX_CONSECUTIVE_FAILURES = 5; // give up (rather than spin forever) after this many bad videos in a row
-
-// YouTube increasingly blocks requests from datacenter/VPS IPs with "Sign in
-// to confirm you're not a bot" unless yt-dlp presents cookies from a real,
-// signed-in browser session. Two ways to supply them, checked in this order:
-//
-// 1. YTDLP_COOKIES_FROM_BROWSER (recommended): a value like
-//    "chromium:/path/to/profile-dir" pointing at a real browser profile kept
-//    logged into a Google account on this machine. yt-dlp reads cookies
-//    live from that profile on every single request, so — unlike a static
-//    file — this never goes stale on its own; it just keeps working for as
-//    long as that browser profile stays logged in (typically months), with
-//    no manual re-export/copy step ever required. See README.md for how to
-//    set this up once.
-// 2. YTDLP_COOKIES_FILE: a static Netscape-format cookies.txt (exported via
-//    a browser extension). Simpler to set up, but it's a point-in-time
-//    snapshot that WILL eventually expire and need re-exporting by hand —
-//    only use this if setting up a persistent browser profile isn't
-//    practical for you.
-const YTDLP_COOKIES_FROM_BROWSER = process.env.YTDLP_COOKIES_FROM_BROWSER || null;
-const YTDLP_COOKIES_FILE = process.env.YTDLP_COOKIES_FILE || null;
-const YTDLP_COOKIE_ARGS = YTDLP_COOKIES_FROM_BROWSER
-  ? ["--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER]
-  : YTDLP_COOKIES_FILE
-    ? ["--cookies", YTDLP_COOKIES_FILE]
-    : [];
-
-// yt-dlp increasingly needs to solve a JS "signature"/"n" challenge to get
-// playable URLs at all (independent of cookies/bot-detection above) — when
-// installed via pip/apt (as opposed to yt-dlp's own standalone release
-// build) it won't auto-fetch the solver component unless explicitly
-// allowed here. Requires a JS runtime on PATH too (Deno; see README).
-// Harmless/no-op if a bundled solver is already present.
-const YTDLP_EXTRA_ARGS = ["--remote-components", "ejs:github"];
 
 interface PlaylistEntry {
   id: string;
@@ -71,22 +38,6 @@ function encodeIcyMeta(nowPlaying: string): Uint8Array {
   buf[0] = blockBytes / 16;
   buf.set(new TextEncoder().encode(text), 1);
   return buf;
-}
-
-const MAX_STDERR_CHARS = 4000; // cap so a runaway/looping process can't bloat memory or logs
-
-// Reads an entire stderr stream to text, bounded so a chatty or runaway
-// process can't grow unbounded in memory. Used purely for error reporting
-// when a subprocess fails — normal/successful runs never have this text
-// looked at.
-async function drainText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
-  if (!stream) return "";
-  try {
-    const text = await new Response(stream).text();
-    return text.length > MAX_STDERR_CHARS ? `…${text.slice(-MAX_STDERR_CHARS)}` : text;
-  } catch {
-    return "";
-  }
 }
 
 async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[]> {

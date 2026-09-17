@@ -120,7 +120,7 @@ file exists, those env vars are ignored — the file is the source of truth.
 | `PORT`                | HTTP port                                                  | `8000`            |
 | `ADMIN_USERNAME`      | Initial admin username (first boot only — see above)      | `admin`           |
 | `ADMIN_PASSWORD_HASH` | bcrypt hash for the initial admin password (first boot only) | hash of `changeme`, forces a password change on first login |
-| `JWT_SECRET`          | Secret used to sign session cookies                        | dev default — **change this** |
+| `JWT_SECRET`          | Secret used to sign session cookies                        | auto-generated & persisted on first boot (see below) |
 | `APP_VERSION`         | Version this deployment reports as "current"               | `0.0.0`           |
 | `GITHUB_REPO`         | `owner/repo` to check for releases                         | `pbaekgaard/cliamp-radio` |
 
@@ -131,10 +131,15 @@ first-login password change):
 cd server && bun -e "console.log(require('bcryptjs').hashSync('your-password', 10))"
 ```
 
-**Change `JWT_SECRET` before exposing this to the internet** — the dev
-default is not safe for production. The admin password is handled by the
-forced first-login change described above, so there's nothing else to
-rotate manually.
+`JWT_SECRET` has no built-in default — if you don't set it, the server
+generates a random 384-bit secret the first time it boots and saves it to
+`server/data/jwt-secret.txt` (gitignored, `0600` permissions, never touched
+by `git pull`/updates), so sessions survive restarts without you having to
+manage a secret by hand. You only need to set the env var yourself if you
+want a specific/shared value (e.g. running multiple instances behind a load
+balancer that all need to accept each other's session cookies). Either way,
+keep whatever value ends up in use private — anyone who has it can forge
+admin session cookies.
 
 ## Adding stations
 
@@ -295,9 +300,11 @@ service. The unit file lives outside this git repo, so it's never touched or
 reset by `git pull` or an update — you only need to run this once.
 
 After that, set up HTTPS with [Caddy](#https-recommended-put-caddy-in-front)
-(see above), and optionally edit `/etc/systemd/system/cliamp-radio.service`
-to uncomment/set `JWT_SECRET` (then `sudo systemctl daemon-reload && sudo
-systemctl restart cliamp-radio`).
+(see above). `JWT_SECRET` doesn't need any manual setup — see
+[Configuration](#configuration-environment-variables) — but you can still
+uncomment/set it in `/etc/systemd/system/cliamp-radio.service` if you want to
+pin a specific value (e.g. sharing one secret across multiple instances),
+then `sudo systemctl daemon-reload && sudo systemctl restart cliamp-radio`.
 
 To release an update: tag and push (`git tag v1.0.1 && git push --tags`) —
 GitHub Actions publishes a Release, and every running instance picks it up on

@@ -80,6 +80,9 @@ Environment=NODE_ENV=production
 # use the forced "changeme" -> new password flow instead.
 # Environment=ADMIN_USERNAME=admin
 # Environment=ADMIN_PASSWORD_HASH=...
+# JWT_SECRET doesn't need to be set — a random one is generated and
+# persisted to server/data/jwt-secret.txt on first boot. Only set this if
+# you want to pin/share a specific value (see README).
 # Environment=JWT_SECRET=change-me-to-something-random
 # Environment=APP_VERSION=1.0.0
 # Environment=GITHUB_REPO=pbaekgaard/cliamp-radio
@@ -115,5 +118,5 @@ echo
 echo "==> Done. Status:"
 systemctl status cliamp-radio --no-pager || true
 echo
-echo "Next: put a reverse proxy (see deploy/Caddyfile) in front of port 8000 for HTTPS,"
-echo "and set JWT_SECRET (uncomment + edit ${UNIT_PATH}, then: systemctl daemon-reload && systemctl restart cliamp-radio)."
+echo "Next: put a reverse proxy (see deploy/Caddyfile) in front of port 8000 for HTTPS."
+echo "JWT_SECRET is auto-generated and persisted to server/data/jwt-secret.txt — no action needed."

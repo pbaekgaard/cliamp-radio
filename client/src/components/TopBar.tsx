@@ -18,19 +18,26 @@ export default function TopBar() {
           <span className="topbar-brand-by">by baekgaard.dev</span>
         </span>
       </Link>
-      {location.pathname === "/login" ? (
-        <Link className="btn-secondary" to="/">
-          View public page
-        </Link>
-      ) : username ? (
-        <Link className="btn-secondary" to="/dashboard">
-          Dashboard
-        </Link>
-      ) : (
-        <Link className="btn-secondary" to="/login">
-          Admin login
-        </Link>
-      )}
+      <div className="topbar-actions">
+        {location.pathname !== "/deif" && (
+          <Link className="btn-secondary" to="/deif">
+            DEIF FM
+          </Link>
+        )}
+        {location.pathname === "/login" ? (
+          <Link className="btn-secondary" to="/">
+            View public page
+          </Link>
+        ) : username ? (
+          <Link className="btn-secondary" to="/dashboard">
+            Dashboard
+          </Link>
+        ) : (
+          <Link className="btn-secondary" to="/login">
+            Admin login
+          </Link>
+        )}
+      </div>
     </header>
   );
 }

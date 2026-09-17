@@ -1,11 +1,13 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { DeifProvider } from "./DeifContext";
 import { UpdateProvider } from "./UpdateContext";
 import ChangePasswordModal from "./components/ChangePasswordModal";
 import ListenersGlobe from "./components/ListenersGlobe";
 import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
+import Deif from "./pages/Deif";
 import Login from "./pages/Login";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -26,6 +28,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/deif" element={<Deif />} />
         <Route
           path="/dashboard"
           element={
@@ -42,9 +45,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <UpdateProvider>
-        <AppRoutes />
-      </UpdateProvider>
+      <DeifProvider>
+        <UpdateProvider>
+          <AppRoutes />
+        </UpdateProvider>
+      </DeifProvider>
     </AuthProvider>
   );
 }

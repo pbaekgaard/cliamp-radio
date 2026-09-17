@@ -77,6 +77,21 @@ export interface PlaylistStreamStatus {
   nowPlaying: { artist: string; title: string } | null;
 }
 
+export interface DeifQueueItem {
+  id: number;
+  videoId: string;
+  url: string;
+  artist: string;
+  title: string;
+  addedBy: string;
+  addedAt: number;
+}
+
+export interface DeifQueueState {
+  nowPlaying: DeifQueueItem | null;
+  queue: DeifQueueItem[];
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -132,4 +147,14 @@ export const api = {
       return { ok: false, log: `Server returned ${res.status} ${res.statusText} with no readable output.` };
     }
   },
+
+  // --- DEIF FM ---
+  deifIdentify: (name: string) => request<{ name: string }>("/api/deif/identify", { method: "POST", body: JSON.stringify({ name }) }),
+  deifMe: () => request<{ name: string }>("/api/deif/me"),
+  deifLogout: () => request("/api/deif/logout", { method: "POST" }),
+  deifQueue: () => request<DeifQueueState>("/api/deif/queue"),
+  deifAddToQueue: (url: string) =>
+    request<DeifQueueItem>("/api/deif/queue", { method: "POST", body: JSON.stringify({ url }) }),
+  deifRemoveFromQueue: (id: number) => request(`/api/deif/queue/${id}`, { method: "DELETE" }),
+  deifSkipCurrent: () => request("/api/deif/queue/current/skip", { method: "POST" }),
 };

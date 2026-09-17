@@ -1,0 +1,10 @@
+{
+  "slug": "deif-radio",
+  "name": "DEIF RADIO",
+  "tracks": [
+    {
+      "title": "DEIF FM",
+      "path": "deif-fm://queue"
+    }
+  ]
+}

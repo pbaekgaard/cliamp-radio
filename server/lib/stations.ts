@@ -18,6 +18,13 @@ export interface Station {
 
 export const ALL_STATION_SLUG = "master";
 
+// Special track path recognized by renderM3U() for the DEIF FM queue
+// "channel": rewritten to this server's own always-on `/live/deif-fm.mp3`
+// stream (see server/lib/deifQueue.ts) instead of being treated as a normal
+// track/playlist URL, the same way YouTube playlist links are rewritten to
+// the shared `/live/<playlistId>.mp3` endpoint below.
+export const DEIF_QUEUE_MARKER = "deif-fm://queue";
+
 // Non-playable placeholder used for the divider entries in the "All
 // Stations" playlist, so a header like "---- Chill Radio ----" shows up as
 // a real, clickable-but-inert list entry between each station's tracks.
@@ -125,6 +132,26 @@ export async function deleteStation(slug: string): Promise<boolean> {
   }
 }
 
+const DEIF_STATION_SLUG = "deif-radio";
+
+/**
+ * Creates the "DEIF RADIO" station (with its single "DEIF FM" queue
+ * channel) the first time the server boots, if it doesn't already exist.
+ * Safe to call on every startup — a no-op once the station file exists, so
+ * renaming/removing it later is a real, persisted admin choice rather than
+ * something that gets silently recreated.
+ */
+export async function ensureDeifStation(): Promise<void> {
+  await ensureDir();
+  const existing = await getStation(DEIF_STATION_SLUG);
+  if (existing) return;
+  await saveStation({
+    slug: DEIF_STATION_SLUG,
+    name: "DEIF RADIO",
+    tracks: [{ title: "DEIF FM", path: DEIF_QUEUE_MARKER }],
+  });
+}
+
 /**
  * Renders a station as an M3U playlist. Any track whose `path` is a YouTube
  * playlist link (a "Radio" mix or a saved playlist — anything with a
@@ -138,8 +165,13 @@ export async function deleteStation(slug: string): Promise<boolean> {
 export function renderM3U(station: Station, baseUrl: string): string {
   const lines = ["#EXTM3U", `#PLAYLIST:${station.name}`];
   for (const track of station.tracks) {
-    const playlistId = extractYouTubePlaylistId(track.path);
-    const path = playlistId ? `${baseUrl}/cliamp-radio/live/${playlistId}.mp3` : track.path;
+    const path =
+      track.path === DEIF_QUEUE_MARKER
+        ? `${baseUrl}/cliamp-radio/live/deif-fm.mp3`
+        : (() => {
+            const playlistId = extractYouTubePlaylistId(track.path);
+            return playlistId ? `${baseUrl}/cliamp-radio/live/${playlistId}.mp3` : track.path;
+          })();
     lines.push(`#EXTINF:-1,${track.title}`, path);
   }
   return lines.join("\n") + "\n";
