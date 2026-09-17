@@ -751,6 +751,21 @@ input {
   margin-bottom: 20px;
 }
 
+.deif-join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deif-join-form-row {
+  display: flex;
+  gap: 8px;
+}
+
+.deif-join-form input {
+  width: 160px;
+}
+
 .deif-layout {
   display: flex;
   gap: 24px;

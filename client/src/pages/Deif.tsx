@@ -12,7 +12,11 @@ function timeAgo(ts: number): string {
   return `${hours}h ago`;
 }
 
-function IdentifyForm() {
+// Lets an anonymous viewer pick a name to become a participant. Shown inline
+// in the header (not a full-page gate) — anyone can browse the page
+// (now playing, queue, listeners) without joining; joining is only needed to
+// add tracks, upload, remove your own entries, or vote to skip.
+function JoinForm() {
   const { identify } = useDeif();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,26 +36,21 @@ function IdentifyForm() {
   }
 
   return (
-    <div className="center-page">
-      <form className="card" onSubmit={handleSubmit}>
-        <h1>DEIF FM</h1>
-        <p className="muted">Pick a name so people can see who requested each track — no password needed.</p>
-        <label>
-          Your name
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={24}
-            autoFocus
-            placeholder="e.g. Peter"
-          />
-        </label>
-        {error && <div className="error">{error}</div>}
+    <form className="deif-join-form" onSubmit={handleSubmit}>
+      <div className="deif-join-form-row">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={24}
+          placeholder="Pick a name…"
+          aria-label="Your name"
+        />
         <button className="btn-primary" type="submit" disabled={submitting || !name.trim()}>
-          {submitting ? "Joining…" : "Join the queue"}
+          {submitting ? "Joining…" : "Join"}
         </button>
-      </form>
-    </div>
+      </div>
+      {error && <div className="error">{error}</div>}
+    </form>
   );
 }
 
@@ -193,17 +192,25 @@ function QueuePanel() {
       <div className="deif-header">
         <div>
           <h1>DEIF FM</h1>
-          <p className="muted">
-            Signed in as <strong>{name}</strong>
-          </p>
+          {name ? (
+            <p className="muted">
+              Signed in as <strong>{name}</strong>
+            </p>
+          ) : (
+            <p className="muted">Join to request tracks, upload MP3s, or vote to skip.</p>
+          )}
         </div>
         <div className="header-actions">
           <button className="btn-secondary" onClick={() => toggle("/cliamp-radio/live/deif-fm.mp3", "DEIF FM")}>
             {playing ? "Pause stream" : "▶ Listen live"}
           </button>
-          <button className="btn-secondary" onClick={forget}>
-            Not you?
-          </button>
+          {name ? (
+            <button className="btn-secondary" onClick={forget}>
+              Leave queue
+            </button>
+          ) : (
+            <JoinForm />
+          )}
         </div>
       </div>
 
@@ -220,50 +227,56 @@ function QueuePanel() {
                     requested by <strong>{state.nowPlaying.addedBy}</strong>
                   </div>
                 </div>
-                <button
-                  className={`btn-secondary${state.skipVote.hasVoted ? " deif-vote-active" : ""}`}
-                  onClick={skip}
-                >
-                  {isMineNowPlaying
-                    ? "Skip"
-                    : state.skipVote.hasVoted
-                      ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                      : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
-                </button>
+                {name && (
+                  <button
+                    className={`btn-secondary${state.skipVote.hasVoted ? " deif-vote-active" : ""}`}
+                    onClick={skip}
+                  >
+                    {isMineNowPlaying
+                      ? "Skip"
+                      : state.skipVote.hasVoted
+                        ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                        : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
+                  </button>
+                )}
               </div>
             ) : (
               <div className="deif-now-playing-card muted">Nothing playing yet — add a video below!</div>
             )}
-            {state.nowPlaying && !isMineNowPlaying && (
+            {name && state.nowPlaying && !isMineNowPlaying && (
               <p className="muted deif-vote-hint">
                 Needs {majorityNeeded} of {state.skipVote.total} listening now to skip (a 50/50 split skips too).
               </p>
             )}
           </div>
 
-          <form className="deif-add-form" onSubmit={addToQueue}>
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
-            <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
-              {submitting ? "Adding…" : "Add to queue"}
-            </button>
-          </form>
-          {error && <div className="error">{error}</div>}
+          {name && (
+            <>
+              <form className="deif-add-form" onSubmit={addToQueue}>
+                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
+                <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
+                  {submitting ? "Adding…" : "Add to queue"}
+                </button>
+              </form>
+              {error && <div className="error">{error}</div>}
 
-          <div className="deif-upload-row">
-            <label className="btn-secondary deif-upload-label">
-              {uploading ? "Uploading…" : "Upload an MP3"}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/mpeg,.mp3"
-                onChange={handleFileChange}
-                disabled={uploading}
-                hidden
-              />
-            </label>
-            <span className="muted">One file at a time — it's deleted once it's done playing.</span>
-          </div>
-          {uploadError && <div className="error">{uploadError}</div>}
+              <div className="deif-upload-row">
+                <label className="btn-secondary deif-upload-label">
+                  {uploading ? "Uploading…" : "Upload an MP3"}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="audio/mpeg,.mp3"
+                    onChange={handleFileChange}
+                    disabled={uploading}
+                    hidden
+                  />
+                </label>
+                <span className="muted">One file at a time — it's deleted once it's done playing.</span>
+              </div>
+              {uploadError && <div className="error">{uploadError}</div>}
+            </>
+          )}
 
           <h2 className="deif-queue-heading">Up next ({state.queue.length})</h2>
           <ul className="deif-queue-list">
@@ -286,7 +299,7 @@ function QueuePanel() {
 }
 
 export default function Deif() {
-  const { name, loading } = useDeif();
+  const { loading } = useDeif();
   if (loading) return null;
-  return name ? <QueuePanel /> : <IdentifyForm />;
+  return <QueuePanel />;
 }
