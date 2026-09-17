@@ -98,6 +98,9 @@ export interface DeifQueueState {
   nowPlaying: DeifQueueItem | null;
   queue: DeifQueueItem[];
   listeners: string[];
+  /** Audio-stream connections with no name attached — cliamp (the desktop
+   * player) and anyone browsing /deif who hit "Listen live" without joining. */
+  anonymousListeners: number;
   skipVote: DeifSkipVoteState;
 }
 

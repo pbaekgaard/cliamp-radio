@@ -86,10 +86,11 @@ function QueueRow({
   );
 }
 
-function ListenersPanel({ listeners }: { listeners: string[] }) {
+function ListenersPanel({ listeners, anonymousListeners }: { listeners: string[]; anonymousListeners: number }) {
+  const total = listeners.length + anonymousListeners;
   return (
     <aside className="deif-listeners-panel">
-      <h2 className="deif-listeners-heading">Listeners ({listeners.length})</h2>
+      <h2 className="deif-listeners-heading">Listeners ({total})</h2>
       <ul className="deif-listeners-list">
         {listeners.map((n) => (
           <li key={n} className="deif-listener-row">
@@ -97,7 +98,13 @@ function ListenersPanel({ listeners }: { listeners: string[] }) {
             {n}
           </li>
         ))}
-        {listeners.length === 0 && <li className="muted">Nobody else is on this page right now.</li>}
+        {anonymousListeners > 0 && (
+          <li className="deif-listener-row muted">
+            <span className="live-dot" />
+            {anonymousListeners} via cliamp / unnamed
+          </li>
+        )}
+        {total === 0 && <li className="muted">Nobody's tuned in right now.</li>}
       </ul>
     </aside>
   );
@@ -109,6 +116,7 @@ function QueuePanel() {
     nowPlaying: null,
     queue: [],
     listeners: [],
+    anonymousListeners: 0,
     skipVote: { votes: 0, total: 1, hasVoted: false },
   });
   const [url, setUrl] = useState("");
@@ -292,7 +300,7 @@ function QueuePanel() {
           </ul>
         </div>
 
-        <ListenersPanel listeners={state.listeners} />
+        <ListenersPanel listeners={state.listeners} anonymousListeners={state.anonymousListeners} />
       </div>
     </div>
   );

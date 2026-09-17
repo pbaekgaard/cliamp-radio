@@ -109,7 +109,7 @@ class DeifQueueStream {
   get status() {
     return {
       running: this.current !== null,
-      listeners: this.listenerNames().length,
+      listeners: this.subscribers.size,
       nowPlaying: this.current
         ? { id: this.current.id, artist: this.current.artist, title: this.current.title, addedBy: this.current.addedBy }
         : null,
@@ -119,7 +119,8 @@ class DeifQueueStream {
 
   /** Distinct display names of everyone currently connected to the actual audio
    * stream (subscribers with a name), sorted. Anonymous stream connections
-   * (nobody identified yet) are still played to, just not named here. */
+   * (nobody identified yet) are still played to, just not named here — see
+   * anonymousListenerCount() for those. */
   private listenerNames(): string[] {
     const names = new Set<string>();
     for (const sub of this.subscribers) {
@@ -128,10 +129,23 @@ class DeifQueueStream {
     return [...names].sort((a, b) => a.localeCompare(b));
   }
 
+  /** Count of audio-stream connections with no DEIF identity attached — this
+   * is how cliamp (the desktop/native player, which just requests the raw
+   * mp3 stream and never carries a browser session cookie) shows up, as
+   * well as anyone browsing /deif and hitting "Listen live" without joining. */
+  private anonymousListenerCount(): number {
+    let count = 0;
+    for (const sub of this.subscribers) {
+      if (!sub.name) count++;
+    }
+    return count;
+  }
+
   list(viewerName?: string): {
     nowPlaying: QueueItem | null;
     queue: QueueItem[];
     listeners: string[];
+    anonymousListeners: number;
     skipVote: { votes: number; total: number; hasVoted: boolean };
   } {
     const listeners = this.listenerNames();
@@ -139,6 +153,7 @@ class DeifQueueStream {
       nowPlaying: this.current,
       queue: [...this.queue],
       listeners,
+      anonymousListeners: this.anonymousListenerCount(),
       skipVote: {
         votes: this.skipVotes.size,
         total: Math.max(listeners.length, 1),
