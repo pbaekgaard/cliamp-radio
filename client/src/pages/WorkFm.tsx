@@ -22,6 +22,35 @@ function timeAgo(ts: number): string {
   return `${hours}h ago`;
 }
 
+/** Formats a duration in seconds as "m:ss" (or "h:mm:ss" past an hour). */
+function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
+/** "1:23 / 3:45" progress readout for the now-playing card — ticks locally
+ * off `startedAt` (a server timestamp) instead of polling every second, so
+ * it stays smooth between the room's regular queue polls. Renders nothing
+ * if the track's length isn't known. */
+function NowPlayingClock({ startedAt, durationSec }: { startedAt?: number | null; durationSec?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!startedAt || !durationSec) return null;
+  const elapsed = Math.min(durationSec, Math.max(0, (now - startedAt) / 1000));
+  return (
+    <div className="muted workfm-now-playing-clock">
+      {formatClock(elapsed)} / {formatClock(durationSec)}
+    </div>
+  );
+}
+
 /** Inline SVG icons for the vote buttons — plain emoji/glyphs render
  * inconsistently (or as blank boxes, for Nerd Font glyphs without that font
  * installed) across browsers/OSes, so these are drawn directly instead. */
@@ -717,6 +746,7 @@ function RoomPage({ slug }: { slug: string }) {
                 <div>
                   <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
                   <div className="muted">{state.nowPlaying.artist}</div>
+                  <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
                   <div className="muted">
                     requested by <strong>{state.nowPlaying.addedBy}</strong>
                   </div>

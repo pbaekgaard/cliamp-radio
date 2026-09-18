@@ -1,3 +1,4 @@
+import { relayPaced } from "./audioRelay";
 import { drainText, extractYouTubePlaylistId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 import { listStations } from "./stations";
 
@@ -13,6 +14,8 @@ import { listStations } from "./stations";
 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
+const AUDIO_BYTES_PER_SEC = 16000; // 128kbps ÷ 8 — matches AUDIO_ARGS's bitrate, used to pace relayPaced()
+const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a track starts playing out
 const IDLE_STOP_MS = 60 * 60 * 1000; // stop transcoding this many ms after the last listener leaves (stations are meant to run 24/7 while anyone might be listening; this just saves CPU/bandwidth once nobody has been for a while)
 const PLAYLIST_REFRESH_MS = 6 * 60 * 60 * 1000; // re-fetch the playlist's video list at most this often
 const MAX_CONSECUTIVE_FAILURES = 5; // give up (rather than spin forever) after this many bad videos in a row
@@ -230,12 +233,13 @@ class PlaylistStream {
       { stdout: "pipe", stderr: "pipe" }
     );
     const ffmpeg = Bun.spawn(
-      // `-re` paces ffmpeg's output to the input's native timestamps (real
-      // playback speed) instead of transcoding as fast as the CPU/network
-      // allow — without it, the whole shuffled queue would blow through in
-      // seconds instead of the actual song durations, which would defeat
-      // the point of listeners sharing one live playback position.
-      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-i", "pipe:0", "-vn", ...AUDIO_ARGS, "pipe:1"],
+      // No `-re` here: pacing ffmpeg's *reads* off the piped yt-dlp download
+      // ties its output timing to the network's, so any brief download
+      // stall used to stutter the audible stream. ffmpeg instead transcodes
+      // flat out, and relayPaced() below buffers+paces the real-time output
+      // itself, which can absorb those stalls instead of passing them
+      // through.
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", ...AUDIO_ARGS, "pipe:1"],
       { stdin: ytdlp.stdout, stdout: "pipe", stderr: "pipe" }
     );
     this.ytdlpProc = ytdlp;
@@ -250,12 +254,14 @@ class PlaylistStream {
 
     try {
       const reader = ffmpeg.stdout.getReader();
-      while (true) {
-        if (this.generation !== gen) return; // stopped/torn down mid-track
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value && value.length > 0) this.broadcast(value);
-      }
+      await relayPaced(
+        reader,
+        (chunk) => this.broadcast(chunk),
+        () => this.generation !== gen,
+        AUDIO_BYTES_PER_SEC,
+        PREBUFFER_BYTES
+      );
+      if (this.generation !== gen) return; // stopped/torn down mid-track
       const [ffExit, ytExit] = await Promise.all([ffmpeg.exited, ytdlp.exited]);
       if (ffExit !== 0 && this.generation === gen) {
         const ytErr = (await ytdlpStderr).trim();

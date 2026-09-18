@@ -1,5 +1,6 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { relayPaced } from "./audioRelay";
 import { attachSavedUpload, getLibraryTrack, listMostLiked, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
@@ -19,6 +20,8 @@ import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, 
 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
+const AUDIO_BYTES_PER_SEC = 16000; // 128kbps ÷ 8 — matches AUDIO_ARGS's bitrate, used to pace relayPaced()
+const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a track starts playing out
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
@@ -60,6 +63,10 @@ export interface QueueItem {
    * room's fresh-upload dir, or workfmLibrary's persistent saved-uploads dir
    * (for tracks requeued from the library). */
   diskPath?: string;
+  /** Total track length in seconds, if known — fetched from yt-dlp/ffprobe
+   * at add time (see addToQueue/addUploadToQueue) or, failing that,
+   * best-effort probed right before it starts playing (see loop()). */
+  durationSec?: number;
 }
 
 interface ChatMessage {
@@ -87,8 +94,8 @@ function encodeIcyMeta(nowPlaying: string): Uint8Array {
   return buf;
 }
 
-/** Fetches {title, uploader} for a single YouTube video via yt-dlp. */
-async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: string | null }> {
+/** Fetches {title, uploader, durationSec} for a single YouTube video via yt-dlp. */
+async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: string | null; durationSec?: number }> {
   const proc = Bun.spawn(
     [
       "yt-dlp",
@@ -97,19 +104,59 @@ async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: s
       "--no-playlist",
       "--skip-download",
       "--print",
-      "%(title)s\t%(uploader)s",
+      "%(title)s\t%(uploader)s\t%(duration)s",
       url,
     ],
     { stdout: "pipe", stderr: "pipe" }
   );
   const [text, stderr] = await Promise.all([new Response(proc.stdout).text(), drainText(proc.stderr)]);
   const exitCode = await proc.exited;
-  const [rawTitle, uploader] = text.split("\n")[0]?.split("\t") ?? [];
+  const [rawTitle, uploader, rawDuration] = text.split("\n")[0]?.split("\t") ?? [];
   if (exitCode !== 0 || !rawTitle) {
     const err = stderr.trim();
     throw new Error(err ? `couldn't look up that video: ${err}` : "couldn't look up that video");
   }
-  return { title: rawTitle.trim(), uploader: uploader?.trim() || null };
+  const durationSec = Number.parseFloat(rawDuration ?? "");
+  return {
+    title: rawTitle.trim(),
+    uploader: uploader?.trim() || null,
+    durationSec: Number.isFinite(durationSec) ? Math.round(durationSec) : undefined,
+  };
+}
+
+/** Best-effort track length (seconds) for a YouTube URL, used as a fallback
+ * when a queue item somehow reached play-time without one (see loop()). */
+async function probeUrlDurationSec(url: string): Promise<number | undefined> {
+  try {
+    const proc = Bun.spawn(
+      ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "--no-playlist", "--skip-download", "--print", "%(duration)s", url],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    const text = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) return undefined;
+    const sec = Number.parseFloat(text.split("\n")[0] ?? "");
+    return Number.isFinite(sec) ? Math.round(sec) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Best-effort track length (seconds) for a local audio file via ffprobe. */
+async function probeFileDurationSec(filePath: string): Promise<number | undefined> {
+  try {
+    const proc = Bun.spawn(
+      ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    const text = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) return undefined;
+    const sec = Number.parseFloat(text.trim());
+    return Number.isFinite(sec) ? Math.round(sec) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Best-effort {artist, title} guess from an uploaded file's name, mirroring
@@ -125,6 +172,11 @@ class WorkFmQueueStream {
   private subscribers = new Set<Subscriber>();
   private queue: QueueItem[] = [];
   private current: QueueItem | null = null;
+  // When the current track started playing (ms since epoch, Date.now()) —
+  // paired with current.durationSec so clients can render an "elapsed / total"
+  // indicator without a server round-trip per second. Null whenever nothing's
+  // playing (silence). Reset every time a new track (or a repeat) starts.
+  private currentStartedAt: number | null = null;
   private currentMetaString = "";
   private started = false;
   private currentGen = 0;
@@ -153,7 +205,14 @@ class WorkFmQueueStream {
       listeners: this.subscribers.size,
       members: this.activeMemberNames().length,
       nowPlaying: this.current
-        ? { id: this.current.id, artist: this.current.artist, title: this.current.title, addedBy: this.current.addedBy }
+        ? {
+            id: this.current.id,
+            artist: this.current.artist,
+            title: this.current.title,
+            addedBy: this.current.addedBy,
+            durationSec: this.current.durationSec,
+            startedAt: this.currentStartedAt,
+          }
         : null,
       queueLength: this.queue.length,
     };
@@ -258,7 +317,7 @@ class WorkFmQueueStream {
   }
 
   list(viewerName?: string): {
-    nowPlaying: (QueueItem & { likes: number; likedByMe: boolean }) | null;
+    nowPlaying: (QueueItem & { likes: number; likedByMe: boolean; startedAt: number | null }) | null;
     queue: (QueueItem & { likes: number; likedByMe: boolean })[];
     listeners: string[];
     anonymousListeners: number;
@@ -273,7 +332,7 @@ class WorkFmQueueStream {
     const listening = new Set(listeners);
     const members = this.activeMemberNames().map((name) => ({ name, listening: listening.has(name) }));
     return {
-      nowPlaying: this.current ? this.withLikes(this.current, viewerName) : null,
+      nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
       queue: this.queue.map((item) => this.withLikes(item, viewerName)),
       listeners,
       anonymousListeners: this.anonymousListenerCount(),
@@ -349,6 +408,7 @@ class WorkFmQueueStream {
       addedAt: Date.now(),
       source: "youtube",
       libraryId: `yt:${videoId}`,
+      durationSec: info.durationSec,
     };
     this.queue.push(item);
     this.start();
@@ -386,6 +446,7 @@ class WorkFmQueueStream {
     const bytes = new Uint8Array(await file.arrayBuffer());
     await writeFile(diskPath, bytes);
     this.uploadFiles.set(id, diskPath);
+    const durationSec = await probeFileDurationSec(diskPath);
 
     // The uploader can type over whichever of title/artist they want (e.g.
     // pulled from the mp3's ID3 tags client-side); anything left blank
@@ -405,6 +466,7 @@ class WorkFmQueueStream {
       libraryId,
       saveForLater,
       diskPath,
+      durationSec,
     };
     this.queue.push(item);
     this.start();
@@ -577,6 +639,7 @@ class WorkFmQueueStream {
     while (true) {
       if (this.queue.length === 0) {
         this.current = null;
+        this.currentStartedAt = null;
         this.currentMetaString = "Radio Bækgaard - waiting for requests";
         const gen = ++this.currentGen;
         try {
@@ -592,6 +655,16 @@ class WorkFmQueueStream {
       this.skipVotes.clear();
       this.repeatVotes.clear();
       this.repeatArmed = false;
+      // Fallback for the rare case a queue item reached play-time with no
+      // known length (e.g. requeued from the library, which doesn't refetch
+      // duration) — best-effort only, so the "elapsed / total" indicator
+      // just omits the total if this fails too.
+      if (item.durationSec == null) {
+        item.durationSec = await (item.source === "upload"
+          ? probeFileDurationSec(item.diskPath ?? "")
+          : probeUrlDurationSec(item.url));
+      }
+      this.currentStartedAt = Date.now();
       recordPlay({
         libraryId: item.libraryId,
         source: item.source,
@@ -631,11 +704,13 @@ class WorkFmQueueStream {
       ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
       { stdout: "pipe", stderr: "pipe" }
     );
-    // `-re` paces ffmpeg's output to the input's native timestamps (real
-    // playback speed) so listeners hear the actual song duration instead of
-    // the whole thing blowing through as fast as the CPU/network allow.
+    // No `-re` here: pacing ffmpeg's *reads* off the piped yt-dlp download
+    // ties its output timing to the network's, so any brief download stall
+    // used to stutter the audible stream. ffmpeg instead transcodes flat
+    // out, and relayPaced() below buffers+paces the actual real-time output
+    // itself, which can absorb those stalls instead of passing them through.
     const ffmpeg = Bun.spawn(
-      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-i", "pipe:0", "-vn", ...AUDIO_ARGS, "pipe:1"],
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", ...AUDIO_ARGS, "pipe:1"],
       { stdin: ytdlp.stdout, stdout: "pipe", stderr: "pipe" }
     );
     this.ytdlpProc = ytdlp;
@@ -646,12 +721,14 @@ class WorkFmQueueStream {
 
     try {
       const reader = ffmpeg.stdout.getReader();
-      while (true) {
-        if (this.currentGen !== gen) return; // skipped mid-track
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value && value.length > 0) this.broadcast(value);
-      }
+      await relayPaced(
+        reader,
+        (chunk) => this.broadcast(chunk),
+        () => this.currentGen !== gen,
+        AUDIO_BYTES_PER_SEC,
+        PREBUFFER_BYTES
+      );
+      if (this.currentGen !== gen) return; // skipped mid-track
       const [ffExit, ytExit] = await Promise.all([ffmpeg.exited, ytdlp.exited]);
       if (ffExit !== 0 && this.currentGen === gen) {
         const ytErr = (await ytdlpStderr).trim();

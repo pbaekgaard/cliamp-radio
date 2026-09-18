@@ -997,6 +997,11 @@ input {
   font-size: 17px;
 }
 
+.workfm-now-playing-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
 .workfm-add-form {
   display: flex;
   gap: 10px;

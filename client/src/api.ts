@@ -92,6 +92,12 @@ export interface WorkFmQueueItem {
    * at least once anywhere. */
   likes: number;
   likedByMe: boolean;
+  /** Total track length in seconds, if known. */
+  durationSec?: number;
+  /** Server timestamp (ms since epoch) this track started playing — only
+   * set on `nowPlaying`, null/absent otherwise. Paired with durationSec to
+   * render an "elapsed / total" indicator client-side. */
+  startedAt?: number | null;
 }
 
 export interface WorkFmChatMessage {
