@@ -662,7 +662,7 @@ function RoomPage({ slug }: { slug: string }) {
   if (roomMissing) {
     return (
       <div className="workfm-page">
-        <p className="muted">WorkFM is temporarily unavailable — try refreshing in a moment.</p>
+        <p className="muted">Radio Bækgaard is temporarily unavailable — try refreshing in a moment.</p>
       </div>
     );
   }
@@ -671,7 +671,7 @@ function RoomPage({ slug }: { slug: string }) {
     <div className="workfm-page">
       <div className="workfm-header">
         <div>
-          <h1>{state.roomName || "WorkFM"}</h1>
+          <h1>{state.roomName || "Radio Bækgaard"}</h1>
           {name ? (
             <p className="muted">
               Signed in as <strong>{name}</strong>
@@ -683,7 +683,7 @@ function RoomPage({ slug }: { slug: string }) {
         <div className="header-actions">
           {name ? (
             <>
-              <button className="btn-secondary" onClick={() => toggle(streamUrl, "WorkFM")}>
+              <button className="btn-secondary" onClick={() => toggle(streamUrl, "Radio Bækgaard")}>
                 {playing ? "Pause stream" : "▶ Listen live"}
               </button>
               <button className="btn-danger" onClick={handleLeave}>

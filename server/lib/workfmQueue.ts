@@ -577,7 +577,7 @@ class WorkFmQueueStream {
     while (true) {
       if (this.queue.length === 0) {
         this.current = null;
-        this.currentMetaString = "WorkFM - waiting for requests";
+        this.currentMetaString = "Radio Bækgaard - waiting for requests";
         const gen = ++this.currentGen;
         try {
           await this.playSilence(gen);

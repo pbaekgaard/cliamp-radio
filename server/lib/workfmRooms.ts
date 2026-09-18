@@ -8,7 +8,7 @@ import { WorkFmQueueStream } from "./workfmQueue";
 // ---------------------------------------------------------------------------
 
 export const WORKFM_ROOM_SLUG = "workfm";
-const WORKFM_ROOM_NAME = "WorkFM";
+const WORKFM_ROOM_NAME = "Radio Bækgaard";
 
 export interface WorkFmRoom {
   slug: string;

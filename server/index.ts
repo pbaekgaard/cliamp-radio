@@ -75,7 +75,7 @@ const server = Bun.serve({
       const headers: Record<string, string> = {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-cache, no-store, must-revalidate",
-        "icy-name": asciiHeaderSafe(`WorkFM - ${room.name}`),
+        "icy-name": asciiHeaderSafe(room.name),
       };
       if (wantsMeta) headers["icy-metaint"] = String(WORKFM_ICY_METAINT);
       return new Response(stream, { headers });
