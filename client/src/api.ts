@@ -142,7 +142,8 @@ export interface WorkFmQueueState {
   /** Everyone currently present in the room (page open), each flagged with
    * whether they're also tuned into the audio stream right now. */
   members: WorkFmMember[];
-  /** Top 5 (by like count) songs played in *this* room this session. */
+  /** Top 5 most-liked songs across every WorkFM room (global, not scoped to
+   * this one) — only tracks with at least one like show up. */
   leaderboard: WorkFmLeaderboardEntry[];
   skipVote: WorkFmSkipVoteState;
   repeatVote: WorkFmRepeatVoteState;

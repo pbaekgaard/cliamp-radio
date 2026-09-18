@@ -1,6 +1,6 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { attachSavedUpload, getLibraryTrack, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, getLibraryTrack, listMostLiked, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
@@ -137,12 +137,6 @@ class WorkFmQueueStream {
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
   private chat: ChatMessage[] = [];
   private nextChatId = 1;
-  // libraryId -> who added it *in this room* — distinct from the library's
-  // global addedBy (whoever first added it anywhere). Powers this room's
-  // song leaderboard (see roomLeaderboard() below), which is scoped to
-  // "this session" (this room's lifetime — it's reset every time a fresh
-  // room is created, since rooms are in-memory/ephemeral).
-  private roomTrackAddedBy = new Map<string, string>();
   // name -> last time (ms since epoch) they polled GET /queue for this room.
   // This is how "who's in the room" is tracked — separate from who's
   // actually streaming audio (subscribers) — see touchPresence()/members().
@@ -236,10 +230,10 @@ class WorkFmQueueStream {
     return { ...item, likes, likedByMe };
   }
 
-  /** Top 5 (by like count) songs that have actually played in *this* room —
-   * unlike the library-wide "most liked" view (which spans every room),
-   * this only considers tracks played here (see roomTrackAddedBy, filled in
-   * by loop() the moment a track starts). */
+  /** Top 5 (by like count) songs across *every* WorkFM room — unlike the
+   * old room-scoped version, this is just the global "most liked" library
+   * view (already filtered to tracks with at least one like), reshaped to
+   * the room queue's leaderboard entry shape. */
   private roomLeaderboard(
     viewerName: string | undefined,
     limit = 5
@@ -252,29 +246,15 @@ class WorkFmQueueStream {
     addedBy: string;
     available: boolean;
   }[] {
-    const rows: {
-      libraryId: string;
-      title: string;
-      artist: string;
-      likes: number;
-      likedByMe: boolean;
-      addedBy: string;
-      available: boolean;
-    }[] = [];
-    for (const [libraryId, addedBy] of this.roomTrackAddedBy) {
-      const entry = getLibraryTrack(libraryId);
-      if (!entry) continue;
-      rows.push({
-        libraryId,
-        title: entry.title,
-        artist: entry.artist,
-        likes: entry.likes.length,
-        likedByMe: !!viewerName && entry.likes.includes(viewerName.toLowerCase()),
-        addedBy,
-        available: entry.source === "youtube" || !!entry.savedFilePath,
-      });
-    }
-    return rows.sort((a, b) => b.likes - a.likes || a.title.localeCompare(b.title)).slice(0, limit);
+    return listMostLiked(viewerName, limit).map((e) => ({
+      libraryId: e.id,
+      title: e.title,
+      artist: e.artist,
+      likes: e.likes,
+      likedByMe: e.likedByMe,
+      addedBy: e.addedBy,
+      available: e.available,
+    }));
   }
 
   list(viewerName?: string): {
@@ -612,7 +592,6 @@ class WorkFmQueueStream {
       this.skipVotes.clear();
       this.repeatVotes.clear();
       this.repeatArmed = false;
-      this.roomTrackAddedBy.set(item.libraryId, item.addedBy);
       recordPlay({
         libraryId: item.libraryId,
         source: item.source,

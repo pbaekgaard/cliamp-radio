@@ -586,6 +586,7 @@ function SongLeaderboardPanel({
   return (
     <aside className="workfm-listeners-panel">
       <h2 className="workfm-listeners-heading">🏆 Song leaderboard</h2>
+      <p className="muted workfm-leaderboard-hint">Most-liked songs across every WorkFM room</p>
       <ul className="workfm-library-list">
         {leaderboard.map((t, i) => (
           <li key={t.libraryId} className="workfm-library-row">
@@ -611,7 +612,7 @@ function SongLeaderboardPanel({
             </div>
           </li>
         ))}
-        {leaderboard.length === 0 && <li className="muted">No liked songs in this room yet.</li>}
+        {leaderboard.length === 0 && <li className="muted">No liked songs yet.</li>}
       </ul>
     </aside>
   );
