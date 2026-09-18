@@ -10,14 +10,7 @@ import {
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
 import { getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
-import {
-  createWorkFmRoom,
-  getWorkFmRoom,
-  listWorkFmRooms,
-  removeWorkFmRoom,
-  startWorkFmRoomSweeper,
-  stopAllWorkFmRooms,
-} from "./lib/workfmRooms";
+import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
@@ -69,8 +62,8 @@ const server = Bun.serve({
     const { pathname } = url;
 
     // --- WorkFM audio (public) ---
-    // Backs the URLs that renderM3U() rewrites each room's WORKFM_QUEUE_MARKER
-    // track to: that room's own always-on, queue-driven stream (see
+    // Backs the URL that renderM3U() rewrites the WORKFM_QUEUE_MARKER track
+    // to: WorkFM's single always-on, queue-driven stream (see
     // lib/workfmQueue.ts + lib/workfmRooms.ts).
     const workfmAudioMatch = pathname.match(/^\/cliamp-radio\/live\/workfm\/([^/]+)\.mp3$/);
     if (workfmAudioMatch) {
@@ -251,34 +244,7 @@ const server = Bun.serve({
       );
     }
 
-    // --- WorkFM rooms ---
-    if (pathname === "/api/workfm/rooms" && req.method === "GET") {
-      return json(listWorkFmRooms());
-    }
-
-    if (pathname === "/api/workfm/rooms" && req.method === "POST") {
-      const identity = getWorkFmIdentity(req);
-      if (!identity) return unauthorized();
-      const body = await req.json().catch(() => null);
-      if (typeof body?.name !== "string" || !body.name.trim()) {
-        return json({ error: "a room name is required" }, { status: 400 });
-      }
-      try {
-        const room = createWorkFmRoom(body.name, identity.name);
-        return json({ slug: room.slug, name: room.name, createdAt: room.createdAt, createdBy: room.createdBy }, { status: 201 });
-      } catch (err) {
-        return json({ error: err instanceof Error ? err.message : "failed to create room" }, { status: 400 });
-      }
-    }
-
-    const workfmRoomMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)$/);
-    if (workfmRoomMatch && req.method === "DELETE") {
-      if (!requireAuth(req)) return unauthorized();
-      const removed = await removeWorkFmRoom(decodeURIComponent(workfmRoomMatch[1]!));
-      return removed ? json({ ok: true }) : json({ error: "room not found" }, { status: 404 });
-    }
-
-    // --- WorkFM per-room queue ---
+    // --- WorkFM queue ---
     const workfmRoomQueueMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue$/);
     if (workfmRoomQueueMatch && req.method === "GET") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueMatch[1]!));
@@ -518,14 +484,13 @@ console.log(`cliamp-radio server listening on http://0.0.0.0:${PORT}`);
 // second yt-dlp/ffmpeg startup delay — the moment a first listener connects.
 prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed at startup:", err));
 
-// Note: WorkFM rooms are created on demand (see lib/workfmRooms.ts) — there's
-// no fixed station to pre-warm at startup; each room starts its own
-// playback loop the moment it's created.
-startWorkFmRoomSweeper();
+// Note: WorkFM is a single persistent room (see lib/workfmRooms.ts) that
+// starts its playback loop here, alongside the playlist stations.
+startWorkFmRoom();
 
 function shutdown() {
   stopAllPlaylistStreams();
-  stopAllWorkFmRooms();
+  stopWorkFmRoom();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { listWorkFmRooms } from "./workfmRooms";
+import { getWorkFmRoom, WORKFM_ROOM_SLUG } from "./workfmRooms";
 import { extractYouTubePlaylistId } from "./youtube";
 
 export const STATIONS_DIR = path.join(import.meta.dir, "..", "data", "stations");
@@ -91,17 +91,12 @@ function buildAllStation(stations: Station[]): Station {
   return { slug: ALL_STATION_SLUG, name: "Master Station", tracks, virtual: true };
 }
 
-// Virtual "WORKFM RADIO" station: one track per currently-open WorkFM room
-// (see workfmRooms.ts), so cliamp/M3U clients can tune into whichever room is
-// active without any of it needing to be persisted to disk — rooms come
-// and go as people create them / let them sit empty. When there are no
-// rooms open, this renders as a single dead/inert placeholder track (like
-// the "All Stations" dividers) instead of an empty playlist.
+// Virtual "WORKFM RADIO" station: a single track for WorkFM's one
+// always-on room (see workfmRooms.ts), so cliamp/M3U clients can tune in
+// without anything needing to be persisted to disk.
 function buildWorkFmStation(): Station {
-  const rooms = listWorkFmRooms();
-  const tracks: Track[] = rooms.length
-    ? rooms.map((r) => ({ title: r.name, path: `${WORKFM_QUEUE_MARKER_PREFIX}${r.slug}` }))
-    : [{ title: "No WorkFM rooms open right now — create one at /workfm", path: HEADER_PLACEHOLDER_URL }];
+  const room = getWorkFmRoom(WORKFM_ROOM_SLUG)!;
+  const tracks: Track[] = [{ title: room.name, path: `${WORKFM_QUEUE_MARKER_PREFIX}${room.slug}` }];
   return { slug: WORKFM_STATION_SLUG, name: "WORKFM RADIO", tracks, virtual: true };
 }
 

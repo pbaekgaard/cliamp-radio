@@ -150,17 +150,6 @@ export interface WorkFmQueueState {
   chat: WorkFmChatMessage[];
 }
 
-export interface WorkFmRoomSummary {
-  slug: string;
-  name: string;
-  createdAt: number;
-  createdBy: string;
-  members: number;
-  nowPlaying: { id: number; artist: string; title: string; addedBy: string } | null;
-  queueLength: number;
-}
-
-
 export interface WorkFmSkipResult {
   ok: true;
   skipped?: boolean;
@@ -254,10 +243,6 @@ export const api = {
   workfmIdentify: (name: string) => request<{ name: string }>("/api/workfm/identify", { method: "POST", body: JSON.stringify({ name }) }),
   workfmMe: () => request<{ name: string }>("/api/workfm/me"),
   workfmLogout: () => request("/api/workfm/logout", { method: "POST" }),
-  workfmListRooms: () => request<WorkFmRoomSummary[]>("/api/workfm/rooms"),
-  workfmCreateRoom: (name: string) =>
-    request<{ slug: string; name: string }>("/api/workfm/rooms", { method: "POST", body: JSON.stringify({ name }) }),
-  workfmDeleteRoom: (slug: string) => request(`/api/workfm/rooms/${slug}`, { method: "DELETE" }),
   workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),
   workfmAddToQueue: (slug: string, url: string) =>
     request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue`, { method: "POST", body: JSON.stringify({ url }) }),

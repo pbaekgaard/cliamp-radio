@@ -31,7 +31,6 @@ function AppRoutes() {
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />
         <Route path="/workfm" element={<WorkFm />} />
-        <Route path="/workfm/:slug" element={<WorkFm />} />
         <Route
           path="/dashboard"
           element={
