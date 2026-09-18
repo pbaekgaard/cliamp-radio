@@ -895,15 +895,6 @@ input {
   font-size: 15px;
 }
 
-.workfm-topdj-heading {
-  margin-top: 20px;
-}
-
-.workfm-topdj-row {
-  margin: 0;
-  font-size: 14px;
-}
-
 .workfm-listeners-list {
   display: flex;
   flex-direction: column;

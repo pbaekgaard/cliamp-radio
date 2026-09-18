@@ -124,11 +124,6 @@ export interface WorkFmLeaderboardEntry {
   available: boolean;
 }
 
-export interface WorkFmTopDj {
-  name: string;
-  likes: number;
-}
-
 export interface WorkFmQueueState {
   roomName: string;
   nowPlaying: WorkFmQueueItem | null;
@@ -142,8 +137,6 @@ export interface WorkFmQueueState {
   members: WorkFmMember[];
   /** Top 5 (by like count) songs played in *this* room this session. */
   leaderboard: WorkFmLeaderboardEntry[];
-  /** Whoever added the most cumulatively-liked songs in this room this session. */
-  topDj: WorkFmTopDj | null;
   skipVote: WorkFmSkipVoteState;
   chat: WorkFmChatMessage[];
 }

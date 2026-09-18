@@ -137,9 +137,9 @@ class WorkFmQueueStream {
   private nextChatId = 1;
   // libraryId -> who added it *in this room* — distinct from the library's
   // global addedBy (whoever first added it anywhere). Powers this room's
-  // song leaderboard/top-DJ (see roomLeaderboard()/topDj() below), which are
-  // scoped to "this session" (this room's lifetime — it's reset every time
-  // a fresh room is created, since rooms are in-memory/ephemeral).
+  // song leaderboard (see roomLeaderboard() below), which is scoped to
+  // "this session" (this room's lifetime — it's reset every time a fresh
+  // room is created, since rooms are in-memory/ephemeral).
   private roomTrackAddedBy = new Map<string, string>();
   // name -> last time (ms since epoch) they polled GET /queue for this room.
   // This is how "who's in the room" is tracked — separate from who's
@@ -275,23 +275,6 @@ class WorkFmQueueStream {
     return rows.sort((a, b) => b.likes - a.likes || a.title.localeCompare(b.title)).slice(0, limit);
   }
 
-  /** Whoever added the most cumulatively-liked songs in this room this
-   * session (i.e. sum of likes across every track they added here) — null
-   * if nobody's added anything liked yet. */
-  private topDj(): { name: string; likes: number } | null {
-    const totals = new Map<string, number>(); // name -> summed likes
-    for (const [libraryId, addedBy] of this.roomTrackAddedBy) {
-      const entry = getLibraryTrack(libraryId);
-      if (!entry || entry.likes.length === 0) continue;
-      totals.set(addedBy, (totals.get(addedBy) ?? 0) + entry.likes.length);
-    }
-    let best: { name: string; likes: number } | null = null;
-    for (const [name, likes] of totals) {
-      if (!best || likes > best.likes) best = { name, likes };
-    }
-    return best;
-  }
-
   list(viewerName?: string): {
     nowPlaying: (QueueItem & { likes: number; likedByMe: boolean }) | null;
     queue: (QueueItem & { likes: number; likedByMe: boolean })[];
@@ -299,7 +282,6 @@ class WorkFmQueueStream {
     anonymousListeners: number;
     members: { name: string; listening: boolean }[];
     leaderboard: ReturnType<WorkFmQueueStream["roomLeaderboard"]>;
-    topDj: { name: string; likes: number } | null;
     skipVote: { votes: number; total: number; hasVoted: boolean };
     chat: ChatMessage[];
   } {
@@ -314,7 +296,6 @@ class WorkFmQueueStream {
       anonymousListeners: this.anonymousListenerCount(),
       members,
       leaderboard: this.roomLeaderboard(viewerName),
-      topDj: this.topDj(),
       skipVote: {
         votes: this.skipVotes.size,
         total: Math.max(listeners.length, 1),

@@ -10,7 +10,6 @@ import {
   type WorkFmQueueItem,
   type WorkFmQueueState,
   type WorkFmRoomSummary,
-  type WorkFmTopDj,
 } from "../api";
 import { readId3Tags, titleFromFilename } from "../id3";
 import { useAuth } from "../AuthContext";
@@ -555,13 +554,11 @@ function ChatPanel({
 
 function SongLeaderboardPanel({
   leaderboard,
-  topDj,
   slug,
   name,
   onRequeued,
 }: {
   leaderboard: WorkFmLeaderboardEntry[];
-  topDj: WorkFmTopDj | null;
   slug: string;
   name: string | null;
   onRequeued: () => void;
@@ -616,14 +613,6 @@ function SongLeaderboardPanel({
         ))}
         {leaderboard.length === 0 && <li className="muted">No liked songs in this room yet.</li>}
       </ul>
-      <h2 className="workfm-listeners-heading workfm-topdj-heading">🎧 Top DJ this session</h2>
-      {topDj ? (
-        <p className="workfm-topdj-row">
-          <strong>{topDj.name}</strong> · {topDj.likes} like{topDj.likes === 1 ? "" : "s"}
-        </p>
-      ) : (
-        <p className="muted">Nobody's earned that title yet.</p>
-      )}
     </aside>
   );
 }
@@ -781,7 +770,6 @@ function RoomPage({ slug }: { slug: string }) {
     anonymousListeners: 0,
     members: [],
     leaderboard: [],
-    topDj: null,
     skipVote: { votes: 0, total: 1, hasVoted: false },
     chat: [],
   });
@@ -1001,7 +989,6 @@ function RoomPage({ slug }: { slug: string }) {
         <div className="workfm-sidebar">
           <SongLeaderboardPanel
             leaderboard={state.leaderboard}
-            topDj={state.topDj}
             slug={slug}
             name={name}
             onRequeued={poll}
