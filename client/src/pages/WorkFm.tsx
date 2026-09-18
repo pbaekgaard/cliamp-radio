@@ -893,8 +893,6 @@ function RoomPage({ slug }: { slug: string }) {
     );
   }
 
-  const majorityNeeded = Math.ceil(state.skipVote.total / 2);
-
   return (
     <div className="workfm-page">
       <div className="workfm-header">
@@ -988,11 +986,6 @@ function RoomPage({ slug }: { slug: string }) {
               </div>
             ) : (
               <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
-            )}
-            {name && state.nowPlaying && (
-              <p className="muted workfm-vote-hint">
-                Needs {majorityNeeded} of {state.skipVote.total} listening now to skip (a 50/50 split skips too).
-              </p>
             )}
             {name && state.nowPlaying && state.repeatVote.armed && (
               <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
