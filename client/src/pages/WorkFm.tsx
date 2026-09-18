@@ -25,6 +25,28 @@ function timeAgo(ts: number): string {
   return `${hours}h ago`;
 }
 
+/** Inline SVG icons for the vote buttons — plain emoji/glyphs render
+ * inconsistently (or as blank boxes, for Nerd Font glyphs without that font
+ * installed) across browsers/OSes, so these are drawn directly instead. */
+function SkipIcon() {
+  return (
+    <svg className="workfm-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M6 5v14l10-7L6 5zm11 0v14h2V5h-2z" />
+    </svg>
+  );
+}
+
+function RepeatIcon() {
+  return (
+    <svg className="workfm-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
+      />
+    </svg>
+  );
+}
+
 /** Small centered dialog used for both joining a room and creating one.
  * Closes on Escape or a click on the backdrop. */
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -948,7 +970,7 @@ function RoomPage({ slug }: { slug: string }) {
                           : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
                       }
                     >
-                      󰒬 {state.skipVote.votes}/{state.skipVote.total}
+                      <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
                     </button>
                     <button
                       className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
@@ -959,7 +981,7 @@ function RoomPage({ slug }: { slug: string }) {
                           : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
                       }
                     >
-                      󰑖 {state.repeatVote.votes}/{state.repeatVote.total}
+                      <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
                     </button>
                   </div>
                 )}

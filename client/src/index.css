@@ -982,14 +982,14 @@ input {
 }
 
 .workfm-now-playing-actions .btn-secondary {
-  /* Nerd Font icon glyphs (skip/repeat) fall back to the OS's Nerd Font if
-   * installed, otherwise to a monospace glyph so the layout doesn't shift
-   * even when the icon itself renders as tofu. */
-  font-family: "Symbols Nerd Font", "JetBrainsMono Nerd Font", inherit;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+
+.workfm-icon {
+  flex-shrink: 0;
 }
 
 .workfm-now-playing-title {
