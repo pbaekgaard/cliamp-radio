@@ -445,15 +445,36 @@ class WorkFmQueueStream {
   }
 
   /**
-   * Reconstructs a queue entry from a previously-saved library upload (see
-   * workfmLibrary.ts's listSavedUploads) and adds it to this room's queue,
-   * pointing straight at the shared saved file — it's deliberately not
+   * Reconstructs a queue entry from a library track and adds it to this
+   * room's queue. For YouTube tracks this just points back at the same
+   * video (always available — re-fetched via yt-dlp same as any fresh
+   * request). For uploads it points straight at the shared saved file on
+   * disk (see workfmLibrary.ts's listSavedUploads) — it's deliberately not
    * registered in `uploadFiles`, so cleanup after play never deletes the
    * shared/retained asset (only the retention sweep in workfmLibrary.ts does).
    */
   requeueFromLibrary(entry: LibraryTrack, addedBy: string): QueueItem {
     if (this.queue.length >= MAX_QUEUE_LENGTH) throw new Error("the queue is full — try again once it's shorter");
-    if (entry.source !== "upload" || !entry.savedFilePath) throw new Error("that track is no longer available");
+
+    if (entry.source === "youtube") {
+      if (!entry.videoId || !entry.url) throw new Error("that track is no longer available");
+      const item: QueueItem = {
+        id: this.nextId++,
+        videoId: entry.videoId,
+        url: entry.url,
+        artist: entry.artist,
+        title: entry.title,
+        addedBy,
+        addedAt: Date.now(),
+        source: "youtube",
+        libraryId: entry.id,
+      };
+      this.queue.push(item);
+      this.start();
+      return item;
+    }
+
+    if (!entry.savedFilePath) throw new Error("that track is no longer available");
     const item: QueueItem = {
       id: this.nextId++,
       videoId: "",
