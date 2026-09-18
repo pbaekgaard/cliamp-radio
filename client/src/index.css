@@ -1282,11 +1282,16 @@ input {
 .mini-player-volume-slider {
   /* Custom-styled (instead of the OS-default control) with a bigger thumb
    * and wider track, so it's easy to grab and drag precisely all the way
-   * to either end with a mouse, trackpad, or finger. */
+   * to either end with a mouse, trackpad, or finger. `padding`/`border` are
+   * reset to override the generic `input` rule above, which otherwise adds
+   * invisible padding inside the box that pushes the thumb off the ends of
+   * the visible track. */
   -webkit-appearance: none;
   appearance: none;
   width: 100px;
   height: 4px;
+  padding: 0;
+  border: none;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.15);
   cursor: pointer;
