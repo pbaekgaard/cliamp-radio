@@ -1254,3 +1254,16 @@ input {
   white-space: nowrap;
   max-width: 40vw;
 }
+
+.mini-player-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.mini-player-volume-slider {
+  width: 80px;
+  accent-color: var(--accent, #7cf7c4);
+  cursor: pointer;
+}

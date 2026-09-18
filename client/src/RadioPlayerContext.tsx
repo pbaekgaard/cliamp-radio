@@ -1,8 +1,16 @@
-import { createContext, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 interface NowPlaying {
   url: string;
   label: string;
+}
+
+const VOLUME_STORAGE_KEY = "radioPlayerVolume";
+
+function loadStoredVolume(): number {
+  const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+  const parsed = raw !== null ? Number(raw) : NaN;
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
 }
 
 interface RadioPlayerState {
@@ -10,6 +18,9 @@ interface RadioPlayerState {
   /** Toggles playback of `url` — pauses if it's already playing, otherwise switches to it. */
   toggle: (url: string, label: string) => void;
   stop: () => void;
+  /** 0–1, local to this browser only — doesn't affect anyone else listening. */
+  volume: number;
+  setVolume: (volume: number) => void;
 }
 
 const RadioPlayerContext = createContext<RadioPlayerState | null>(null);
@@ -21,6 +32,11 @@ const RadioPlayerContext = createContext<RadioPlayerState | null>(null);
 export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [volume, setVolumeState] = useState(loadStoredVolume);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
 
   function toggle(url: string, label: string) {
     const audio = audioRef.current;
@@ -31,6 +47,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     audio.src = url;
+    audio.volume = volume;
     audio.play().catch(() => {});
     setNowPlaying({ url, label });
   }
@@ -41,8 +58,16 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     setNowPlaying(null);
   }
 
+  /** This browser's playback volume only — everyone else keeps hearing the
+   * stream at whatever level they've set for themselves. */
+  function setVolume(next: number) {
+    const clamped = Math.min(1, Math.max(0, next));
+    setVolumeState(clamped);
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(clamped));
+  }
+
   return (
-    <RadioPlayerContext.Provider value={{ nowPlaying, toggle, stop }}>
+    <RadioPlayerContext.Provider value={{ nowPlaying, toggle, stop, volume, setVolume }}>
       {children}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <audio ref={audioRef} preload="none" onEnded={stop} onError={stop} />
