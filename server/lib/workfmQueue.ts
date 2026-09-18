@@ -1,6 +1,6 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { attachSavedUpload, getLibraryTrack, recordPlay, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, getLibraryTrack, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
@@ -386,12 +386,13 @@ class WorkFmQueueStream {
   }
 
   /**
-   * Saves an uploaded mp3 to disk and adds it to the queue. Unless
-   * `saveForLater` is false, the file is moved into workfmLibrary's
-   * persistent saved-uploads store once it finishes playing so it can be
-   * requeued later (for up to ~2 months); otherwise it's deleted right
-   * away, same as before — either way it never lingers in this room's
-   * temporary upload dir past its turn.
+   * Saves an uploaded mp3 to disk and adds it to the queue. If `saveForLater`
+   * is set, a persistent copy is written into workfmLibrary's saved-uploads
+   * store *right away* (not just once it finishes playing) — so it shows up
+   * under "Saved uploads"/"Most liked" and is requeueable immediately,
+   * regardless of how long it sits in the queue first. Either way, this
+   * room's own temporary copy is deleted once its turn is done (see the
+   * `finally` block in loop()).
    */
   async addUploadToQueue(
     file: File,
@@ -412,7 +413,8 @@ class WorkFmQueueStream {
     const id = this.nextId++;
     const libraryId = `up:${crypto.randomUUID()}`;
     const diskPath = path.join(UPLOADS_DIR, `${id}-${crypto.randomUUID()}.mp3`);
-    await writeFile(diskPath, new Uint8Array(await file.arrayBuffer()));
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await writeFile(diskPath, bytes);
     this.uploadFiles.set(id, diskPath);
 
     // The uploader can type over whichever of title/artist they want (e.g.
@@ -436,6 +438,19 @@ class WorkFmQueueStream {
     };
     this.queue.push(item);
     this.start();
+
+    if (saveForLater) {
+      registerUpload({ libraryId, source: "upload", videoId: "", url: "", artist, title, addedBy });
+      try {
+        await mkdir(SAVED_UPLOADS_DIR, { recursive: true });
+        const savedPath = path.join(SAVED_UPLOADS_DIR, `${libraryId.replace(/[^a-zA-Z0-9_-]/g, "")}.mp3`);
+        await writeFile(savedPath, bytes);
+        attachSavedUpload(libraryId, savedPath, Date.now() + SAVED_UPLOAD_TTL_MS);
+      } catch (err) {
+        console.error(`[workfm-queue] failed to save upload "${title}" for later:`, err);
+      }
+    }
+
     return item;
   }
 
@@ -476,30 +491,6 @@ class WorkFmQueueStream {
       await rm(filePath, { force: true });
     } catch (err) {
       console.error(`[workfm-queue] failed to delete uploaded file ${filePath}:`, err);
-    }
-  }
-
-  /** Moves a fresh upload's file into workfmLibrary's persistent saved-uploads
-   * store (instead of deleting it) once it's done playing, and records the
-   * retention window there. A no-op (falls back to normal delete) if the
-   * item isn't registered in `uploadFiles` — e.g. it was requeued from the
-   * library and already lives there. */
-  private async persistUploadForLater(item: QueueItem) {
-    const filePath = this.uploadFiles.get(item.id);
-    this.uploadFiles.delete(item.id);
-    if (!filePath) return; // already a shared/persistent file — nothing to move
-    try {
-      await mkdir(SAVED_UPLOADS_DIR, { recursive: true });
-      const savedPath = path.join(SAVED_UPLOADS_DIR, `${item.libraryId.replace(/[^a-zA-Z0-9_-]/g, "")}.mp3`);
-      await rename(filePath, savedPath);
-      attachSavedUpload(item.libraryId, savedPath, Date.now() + SAVED_UPLOAD_TTL_MS);
-    } catch (err) {
-      console.error(`[workfm-queue] failed to persist saved upload ${filePath}:`, err);
-      try {
-        await rm(filePath, { force: true });
-      } catch {
-        // already gone
-      }
     }
   }
 
@@ -600,10 +591,11 @@ class WorkFmQueueStream {
       } catch (err) {
         console.error(`[workfm-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
       } finally {
-        if (item.source === "upload") {
-          if (item.saveForLater) this.persistUploadForLater(item).catch(() => {});
-          else this.cleanupUpload(item.id).catch(() => {});
-        }
+        // The room's own temp copy is always cleaned up once played — if
+        // saveForLater was set, a persistent copy was already written to
+        // workfmLibrary's saved-uploads store at upload time (see
+        // addUploadToQueue), so nothing else needs to happen here.
+        if (item.source === "upload") this.cleanupUpload(item.id).catch(() => {});
       }
     }
   }

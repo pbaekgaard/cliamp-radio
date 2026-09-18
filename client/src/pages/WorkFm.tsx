@@ -680,7 +680,7 @@ const LIBRARY_TABS: { view: WorkFmLibraryView; label: string }[] = [
 function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string | null; onRequeued: () => void }) {
   const [view, setView] = useState<WorkFmLibraryView>("history");
   const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {

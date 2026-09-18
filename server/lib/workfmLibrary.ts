@@ -111,6 +111,28 @@ export interface PlayedTrack {
   addedBy: string;
 }
 
+/** Ensures a library entry exists for `item` with playCount 0 — called the
+ * moment an mp3 is uploaded (before it's necessarily played), so a saved
+ * copy can be attached (see attachSavedUpload) and show up in "Saved
+ * uploads" right away instead of waiting for its turn in the queue.
+ * recordPlay() above still handles the *play-count* bookkeeping once it
+ * actually plays — this only creates the placeholder entry if missing. */
+export function registerUpload(item: PlayedTrack) {
+  if (library.has(item.libraryId)) return;
+  library.set(item.libraryId, {
+    id: item.libraryId,
+    source: item.source,
+    artist: item.artist,
+    title: item.title,
+    addedBy: item.addedBy,
+    firstPlayedAt: 0,
+    lastPlayedAt: 0,
+    playCount: 0,
+    likes: [],
+  });
+  save();
+}
+
 /** Records that `item` just started playing — upserts its library entry. */
 export function recordPlay(item: PlayedTrack) {
   const now = Date.now();
@@ -139,8 +161,9 @@ export function recordPlay(item: PlayedTrack) {
 }
 
 /** Attaches a persisted, on-disk copy of an uploaded mp3 to its library
- * entry so it can be requeued later — called once a saved upload finishes
- * playing (see workfmQueue.ts). */
+ * entry so it can be requeued later — called immediately at upload time
+ * when "save for later" is checked (see addUploadToQueue in workfmQueue.ts),
+ * not just once it's finished playing. */
 export function attachSavedUpload(libraryId: string, filePath: string, until: number) {
   const entry = library.get(libraryId);
   if (!entry) return;
@@ -168,6 +191,7 @@ export function getLibraryTrack(id: string): LibraryTrack | null {
 
 export function listHistory(viewerName?: string, limit = 50): LibraryTrackSummary[] {
   return [...library.values()]
+    .filter((e) => e.playCount > 0) // exclude upload placeholders that haven't actually played yet (see registerUpload)
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
     .slice(0, limit)
     .map((e) => summarize(e, viewerName));
