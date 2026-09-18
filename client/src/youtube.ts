@@ -5,10 +5,10 @@
 const PLAYLIST_ID_RE = /[?&]list=([a-zA-Z0-9_-]+)/;
 const YT_HOSTNAMES = /(^|\.)youtube\.com$|(^|\.)music\.youtube\.com$|(^|\.)youtu\.be$/;
 
-// Mirrors server/lib/stations.ts's DEIF_QUEUE_MARKER — the special track
-// path for the DEIF FM queue channel, rewritten to a dedicated live stream
-// endpoint rather than resolved as a normal YouTube URL.
-const DEIF_QUEUE_MARKER = "deif-fm://queue";
+// Mirrors server/lib/stations.ts's WORKFM_QUEUE_MARKER_PREFIX — the special
+// track path prefix for a WorkFM room channel, rewritten to a dedicated live
+// stream endpoint rather than resolved as a normal YouTube URL.
+const WORKFM_QUEUE_MARKER_PREFIX = "workfm://queue/";
 
 export function extractYouTubePlaylistId(url: string): string | null {
   let parsed: URL;
@@ -50,15 +50,17 @@ export function extractYouTubeVideoId(url: string): string | null {
 /**
  * Resolves the browser-playable live-stream URL for a track: a YouTube
  * playlist link (shares the same always-on channel stream as the .m3u
- * output), DEIF FM's queue marker, or a plain non-YouTube http(s) stream
- * URL (e.g. a direct internet-radio stream like GTA radio stations) which
- * is already natively playable and used as-is. Plain single YouTube video
- * links (no `list=` param) are intentionally excluded — tune-in is only
- * offered for playlist channels and already-streamable direct URLs.
+ * output), a WorkFM room's queue marker, or a plain non-YouTube http(s)
+ * stream URL (e.g. a direct internet-radio stream like GTA radio stations)
+ * which is already natively playable and used as-is. Plain single YouTube
+ * video links (no `list=` param) are intentionally excluded — tune-in is
+ * only offered for playlist channels and already-streamable direct URLs.
  * Returns null for tracks with no resolvable stream.
  */
 export function tuneInUrlForTrack(path: string): string | null {
-  if (path === DEIF_QUEUE_MARKER) return "/cliamp-radio/live/deif-fm.mp3";
+  if (path.startsWith(WORKFM_QUEUE_MARKER_PREFIX)) {
+    return `/cliamp-radio/live/workfm/${path.slice(WORKFM_QUEUE_MARKER_PREFIX.length)}.mp3`;
+  }
   const playlistId = extractYouTubePlaylistId(path);
   if (playlistId) return `/cliamp-radio/live/${playlistId}.mp3`;
   if (extractYouTubeVideoId(path)) return null;

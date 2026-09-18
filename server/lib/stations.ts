@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { listWorkFmRooms } from "./workfmRooms";
 import { extractYouTubePlaylistId } from "./youtube";
 
 export const STATIONS_DIR = path.join(import.meta.dir, "..", "data", "stations");
@@ -17,13 +18,14 @@ export interface Station {
 }
 
 export const ALL_STATION_SLUG = "master";
+const WORKFM_STATION_SLUG = "workfm-radio";
 
-// Special track path recognized by renderM3U() for the DEIF FM queue
-// "channel": rewritten to this server's own always-on `/live/deif-fm.mp3`
-// stream (see server/lib/deifQueue.ts) instead of being treated as a normal
-// track/playlist URL, the same way YouTube playlist links are rewritten to
-// the shared `/live/<playlistId>.mp3` endpoint below.
-export const DEIF_QUEUE_MARKER = "deif-fm://queue";
+// Special track path *prefix* recognized by renderM3U() for a WorkFM room
+// "channel": rewritten to that room's own always-on `/live/workfm/<slug>.mp3`
+// stream (see server/lib/workfmQueue.ts + workfmRooms.ts) instead of being
+// treated as a normal track/playlist URL, the same way YouTube playlist
+// links are rewritten to the shared `/live/<playlistId>.mp3` endpoint below.
+export const WORKFM_QUEUE_MARKER_PREFIX = "workfm://queue/";
 
 // Non-playable placeholder used for the divider entries in the "All
 // Stations" playlist, so a header like "---- Chill Radio ----" shows up as
@@ -54,7 +56,7 @@ export function slugify(name: string): string {
 }
 
 export function isReservedSlug(slug: string): boolean {
-  return slug === ALL_STATION_SLUG;
+  return slug === ALL_STATION_SLUG || slug === WORKFM_STATION_SLUG;
 }
 
 async function ensureDir() {
@@ -89,14 +91,32 @@ function buildAllStation(stations: Station[]): Station {
   return { slug: ALL_STATION_SLUG, name: "Master Station", tracks, virtual: true };
 }
 
+// Virtual "WORKFM RADIO" station: one track per currently-open WorkFM room
+// (see workfmRooms.ts), so cliamp/M3U clients can tune into whichever room is
+// active without any of it needing to be persisted to disk — rooms come
+// and go as people create them / let them sit empty. When there are no
+// rooms open, this renders as a single dead/inert placeholder track (like
+// the "All Stations" dividers) instead of an empty playlist.
+function buildWorkFmStation(): Station {
+  const rooms = listWorkFmRooms();
+  const tracks: Track[] = rooms.length
+    ? rooms.map((r) => ({ title: r.name, path: `${WORKFM_QUEUE_MARKER_PREFIX}${r.slug}` }))
+    : [{ title: "No WorkFM rooms open right now — create one at /workfm", path: HEADER_PLACEHOLDER_URL }];
+  return { slug: WORKFM_STATION_SLUG, name: "WORKFM RADIO", tracks, virtual: true };
+}
+
 export async function listStations(): Promise<Station[]> {
   const stations = await listRealStations();
-  return [buildAllStation(stations), ...stations];
+  const workfmStation = buildWorkFmStation();
+  return [buildAllStation([...stations, workfmStation]), workfmStation, ...stations];
 }
 
 export async function getStation(slug: string): Promise<Station | null> {
   if (slug === ALL_STATION_SLUG) {
-    return buildAllStation(await listRealStations());
+    return buildAllStation([...(await listRealStations()), buildWorkFmStation()]);
+  }
+  if (slug === WORKFM_STATION_SLUG) {
+    return buildWorkFmStation();
   }
   await ensureDir();
   try {
@@ -132,26 +152,6 @@ export async function deleteStation(slug: string): Promise<boolean> {
   }
 }
 
-const DEIF_STATION_SLUG = "deif-radio";
-
-/**
- * Creates the "DEIF RADIO" station (with its single "DEIF FM" queue
- * channel) the first time the server boots, if it doesn't already exist.
- * Safe to call on every startup — a no-op once the station file exists, so
- * renaming/removing it later is a real, persisted admin choice rather than
- * something that gets silently recreated.
- */
-export async function ensureDeifStation(): Promise<void> {
-  await ensureDir();
-  const existing = await getStation(DEIF_STATION_SLUG);
-  if (existing) return;
-  await saveStation({
-    slug: DEIF_STATION_SLUG,
-    name: "DEIF RADIO",
-    tracks: [{ title: "DEIF FM", path: DEIF_QUEUE_MARKER }],
-  });
-}
-
 /**
  * Renders a station as an M3U playlist. Any track whose `path` is a YouTube
  * playlist link (a "Radio" mix or a saved playlist — anything with a
@@ -165,13 +165,12 @@ export async function ensureDeifStation(): Promise<void> {
 export function renderM3U(station: Station, baseUrl: string): string {
   const lines = ["#EXTM3U", `#PLAYLIST:${station.name}`];
   for (const track of station.tracks) {
-    const path =
-      track.path === DEIF_QUEUE_MARKER
-        ? `${baseUrl}/cliamp-radio/live/deif-fm.mp3`
-        : (() => {
-            const playlistId = extractYouTubePlaylistId(track.path);
-            return playlistId ? `${baseUrl}/cliamp-radio/live/${playlistId}.mp3` : track.path;
-          })();
+    const path = track.path.startsWith(WORKFM_QUEUE_MARKER_PREFIX)
+      ? `${baseUrl}/cliamp-radio/live/workfm/${track.path.slice(WORKFM_QUEUE_MARKER_PREFIX.length)}.mp3`
+      : (() => {
+          const playlistId = extractYouTubePlaylistId(track.path);
+          return playlistId ? `${baseUrl}/cliamp-radio/live/${playlistId}.mp3` : track.path;
+        })();
     lines.push(`#EXTINF:-1,${track.title}`, path);
   }
   return lines.join("\n") + "\n";

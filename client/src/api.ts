@@ -77,7 +77,7 @@ export interface PlaylistStreamStatus {
   nowPlaying: { artist: string; title: string } | null;
 }
 
-export interface DeifQueueItem {
+export interface WorkFmQueueItem {
   id: number;
   videoId: string;
   url: string;
@@ -86,31 +86,79 @@ export interface DeifQueueItem {
   addedBy: string;
   addedAt: number;
   source: "youtube" | "upload";
+  libraryId: string;
 }
 
-export interface DeifSkipVoteState {
+export interface WorkFmChatMessage {
+  id: number;
+  name: string;
+  text: string;
+  at: number;
+}
+
+export interface WorkFmSkipVoteState {
   votes: number;
   total: number;
   hasVoted: boolean;
 }
 
-export interface DeifQueueState {
-  nowPlaying: DeifQueueItem | null;
-  queue: DeifQueueItem[];
-  listeners: string[];
-  /** Audio-stream connections with no name attached — cliamp (the desktop
-   * player) and anyone browsing /deif who hit "Listen live" without joining. */
-  anonymousListeners: number;
-  skipVote: DeifSkipVoteState;
+export interface WorkFmMember {
+  name: string;
+  /** Whether this person is currently connected to the audio stream, as
+   * opposed to just having the room page open. */
+  listening: boolean;
 }
 
-export interface DeifSkipResult {
+export interface WorkFmQueueState {
+  roomName: string;
+  nowPlaying: WorkFmQueueItem | null;
+  queue: WorkFmQueueItem[];
+  listeners: string[];
+  /** Audio-stream connections with no name attached — cliamp (the desktop
+   * player) and anyone browsing /workfm who hit "Listen live" without joining. */
+  anonymousListeners: number;
+  /** Everyone currently present in the room (page open), each flagged with
+   * whether they're also tuned into the audio stream right now. */
+  members: WorkFmMember[];
+  skipVote: WorkFmSkipVoteState;
+  chat: WorkFmChatMessage[];
+}
+
+export interface WorkFmRoomSummary {
+  slug: string;
+  name: string;
+  createdAt: number;
+  createdBy: string;
+  members: number;
+  nowPlaying: { id: number; artist: string; title: string; addedBy: string } | null;
+  queueLength: number;
+}
+
+
+export interface WorkFmSkipResult {
   ok: true;
   skipped?: boolean;
   votes?: number;
   total?: number;
   hasVoted?: boolean;
 }
+
+export interface WorkFmLibraryTrack {
+  id: string;
+  source: "youtube" | "upload";
+  artist: string;
+  title: string;
+  addedBy: string;
+  firstPlayedAt: number;
+  lastPlayedAt: number;
+  playCount: number;
+  likes: number;
+  likedByMe: boolean;
+  available: boolean;
+  savedUntil?: number;
+}
+
+export type WorkFmLibraryView = "history" | "most-liked" | "saved";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
@@ -168,23 +216,42 @@ export const api = {
     }
   },
 
-  // --- DEIF FM ---
-  deifIdentify: (name: string) => request<{ name: string }>("/api/deif/identify", { method: "POST", body: JSON.stringify({ name }) }),
-  deifMe: () => request<{ name: string }>("/api/deif/me"),
-  deifLogout: () => request("/api/deif/logout", { method: "POST" }),
-  deifQueue: () => request<DeifQueueState>("/api/deif/queue"),
-  deifAddToQueue: (url: string) =>
-    request<DeifQueueItem>("/api/deif/queue", { method: "POST", body: JSON.stringify({ url }) }),
-  deifUploadToQueue: async (file: File) => {
+  // --- WorkFM ---
+  workfmIdentify: (name: string) => request<{ name: string }>("/api/workfm/identify", { method: "POST", body: JSON.stringify({ name }) }),
+  workfmMe: () => request<{ name: string }>("/api/workfm/me"),
+  workfmLogout: () => request("/api/workfm/logout", { method: "POST" }),
+  workfmListRooms: () => request<WorkFmRoomSummary[]>("/api/workfm/rooms"),
+  workfmCreateRoom: (name: string) =>
+    request<{ slug: string; name: string }>("/api/workfm/rooms", { method: "POST", body: JSON.stringify({ name }) }),
+  workfmDeleteRoom: (slug: string) => request(`/api/workfm/rooms/${slug}`, { method: "DELETE" }),
+  workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),
+  workfmAddToQueue: (slug: string, url: string) =>
+    request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue`, { method: "POST", body: JSON.stringify({ url }) }),
+  workfmUploadToQueue: async (
+    slug: string,
+    file: File,
+    saveForLater = true,
+    overrides?: { title?: string; artist?: string },
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/deif/queue/upload", { method: "POST", credentials: "include", body: formData });
+    formData.append("saveForLater", String(saveForLater));
+    if (overrides?.title?.trim()) formData.append("title", overrides.title.trim());
+    if (overrides?.artist?.trim()) formData.append("artist", overrides.artist.trim());
+    const res = await fetch(`/api/workfm/rooms/${slug}/queue/upload`, { method: "POST", credentials: "include", body: formData });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(body.error || `Request failed: ${res.status}`);
     }
-    return res.json() as Promise<DeifQueueItem>;
+    return res.json() as Promise<WorkFmQueueItem>;
   },
-  deifRemoveFromQueue: (id: number) => request(`/api/deif/queue/${id}`, { method: "DELETE" }),
-  deifSkipCurrent: () => request<DeifSkipResult>("/api/deif/queue/current/skip", { method: "POST" }),
+  workfmRemoveFromQueue: (slug: string, id: number) => request(`/api/workfm/rooms/${slug}/queue/${id}`, { method: "DELETE" }),
+  workfmSkipCurrent: (slug: string) => request<WorkFmSkipResult>(`/api/workfm/rooms/${slug}/queue/current/skip`, { method: "POST" }),
+  workfmPostChat: (slug: string, text: string) =>
+    request<WorkFmChatMessage>(`/api/workfm/rooms/${slug}/chat`, { method: "POST", body: JSON.stringify({ text }) }),
+  workfmRequeue: (slug: string, id: string) =>
+    request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue/requeue`, { method: "POST", body: JSON.stringify({ id }) }),
+  workfmLibrary: (view: WorkFmLibraryView = "history") => request<WorkFmLibraryTrack[]>(`/api/workfm/library?view=${view}`),
+  workfmToggleLike: (id: string) =>
+    request<{ likes: number; liked: boolean }>(`/api/workfm/library/${encodeURIComponent(id)}/like`, { method: "POST" }),
 };

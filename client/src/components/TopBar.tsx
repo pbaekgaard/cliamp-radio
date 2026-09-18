@@ -19,9 +19,9 @@ export default function TopBar() {
         </span>
       </Link>
       <div className="topbar-actions">
-        {location.pathname !== "/deif" && (
-          <Link className="btn-secondary" to="/deif">
-            DEIF FM
+        {!location.pathname.startsWith("/workfm") && (
+          <Link className="btn-secondary" to="/workfm">
+            WorkFM
           </Link>
         )}
         {location.pathname === "/login" ? (

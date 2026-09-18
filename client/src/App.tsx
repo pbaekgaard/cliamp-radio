@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
-import { DeifProvider } from "./DeifContext";
+import { WorkFmProvider } from "./WorkFmContext";
 import { RadioPlayerProvider } from "./RadioPlayerContext";
 import { UpdateProvider } from "./UpdateContext";
 import ChangePasswordModal from "./components/ChangePasswordModal";
@@ -9,7 +9,7 @@ import MiniPlayerBar from "./components/MiniPlayerBar";
 import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
-import Deif from "./pages/Deif";
+import WorkFm from "./pages/WorkFm";
 import Login from "./pages/Login";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -30,7 +30,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/deif" element={<Deif />} />
+        <Route path="/workfm" element={<WorkFm />} />
+        <Route path="/workfm/:slug" element={<WorkFm />} />
         <Route
           path="/dashboard"
           element={
@@ -48,13 +49,13 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <DeifProvider>
+      <WorkFmProvider>
         <RadioPlayerProvider>
           <UpdateProvider>
             <AppRoutes />
           </UpdateProvider>
         </RadioPlayerProvider>
-      </DeifProvider>
+      </WorkFmProvider>
     </AuthProvider>
   );
 }

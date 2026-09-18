@@ -116,12 +116,12 @@ export function createSessionToken(username: string): string {
   return jwt.sign({ sub: username, kind: "admin" }, JWT_SECRET, { expiresIn: "7d" });
 }
 
-// Admin and DEIF FM identity tokens (see deifIdentity.ts) are both signed
-// with this same JWT_SECRET, so without a discriminator a valid DEIF
+// Admin and WorkFM identity tokens (see workfmIdentity.ts) are both signed
+// with this same JWT_SECRET, so without a discriminator a valid WorkFM
 // identity token — trivially obtainable by anyone, no password required —
 // could simply be copied into the admin session cookie and would verify
 // successfully here, granting admin access to anyone who names themselves
-// anything in DEIF FM. The `kind` claim keeps the two token types from
+// anything in WorkFM. The `kind` claim keeps the two token types from
 // ever being interchangeable, even though they share a secret.
 export function verifySessionToken(token: string | undefined): { sub: string } | null {
   if (!token) return null;

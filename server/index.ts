@@ -7,13 +7,21 @@ import {
   SESSION_COOKIE,
   verifyCredentials,
 } from "./lib/auth";
-import { createDeifSessionToken, DEIF_SESSION_COOKIE, getDeifIdentity, normalizeDeifName } from "./lib/deifIdentity";
-import { deifQueueStream, ICY_METAINT as DEIF_ICY_METAINT } from "./lib/deifQueue";
+import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
+import { getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
+import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
+import {
+  createWorkFmRoom,
+  getWorkFmRoom,
+  listWorkFmRooms,
+  removeWorkFmRoom,
+  startWorkFmRoomSweeper,
+  stopAllWorkFmRooms,
+} from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
   deleteStation,
-  ensureDeifStation,
   getStation,
   isReservedSlug,
   listStations,
@@ -38,6 +46,14 @@ function unauthorized() {
   return json({ error: "unauthorized" }, { status: 401 });
 }
 
+// HTTP header values must be Latin-1/ASCII-ish — room names are freeform
+// user input (accents, emoji, etc.), so scrub anything outside printable
+// ASCII before using one in the icy-name header (an em dash was enough to
+// make Bun throw and 500 the whole request).
+function asciiHeaderSafe(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, "?");
+}
+
 function clientIp(req: Request, server: Bun.Server): string {
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) return forwarded.split(",")[0].trim();
@@ -52,19 +68,23 @@ const server = Bun.serve({
     const url = new URL(req.url);
     const { pathname } = url;
 
-    // --- DEIF FM audio (public) ---
-    // Backs the URL that renderM3U() rewrites the DEIF_QUEUE_MARKER track
-    // to: the always-on, queue-driven stream (see lib/deifQueue.ts).
-    if (pathname === "/cliamp-radio/live/deif-fm.mp3") {
+    // --- WorkFM audio (public) ---
+    // Backs the URLs that renderM3U() rewrites each room's WORKFM_QUEUE_MARKER
+    // track to: that room's own always-on, queue-driven stream (see
+    // lib/workfmQueue.ts + lib/workfmRooms.ts).
+    const workfmAudioMatch = pathname.match(/^\/cliamp-radio\/live\/workfm\/([^/]+)\.mp3$/);
+    if (workfmAudioMatch) {
+      const room = getWorkFmRoom(decodeURIComponent(workfmAudioMatch[1]!));
+      if (!room) return new Response("Room not found", { status: 404 });
       const wantsMeta = req.headers.get("icy-metadata") === "1";
-      const identity = getDeifIdentity(req);
-      const stream = deifQueueStream.subscribe(wantsMeta, identity?.name);
+      const identity = getWorkFmIdentity(req);
+      const stream = room.stream.subscribe(wantsMeta, identity?.name);
       const headers: Record<string, string> = {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-cache, no-store, must-revalidate",
-        "icy-name": "DEIF FM",
+        "icy-name": asciiHeaderSafe(`WorkFM - ${room.name}`),
       };
-      if (wantsMeta) headers["icy-metaint"] = String(DEIF_ICY_METAINT);
+      if (wantsMeta) headers["icy-metaint"] = String(WORKFM_ICY_METAINT);
       return new Response(stream, { headers });
     }
 
@@ -202,83 +222,187 @@ const server = Bun.serve({
       return json({ ok: true });
     }
 
-    // --- DEIF FM identity (name-only "login", no password/account) ---
-    if (pathname === "/api/deif/identify" && req.method === "POST") {
+    // --- WorkFM identity (name-only "login", no password/account) ---
+    if (pathname === "/api/workfm/identify" && req.method === "POST") {
       const body = await req.json().catch(() => null);
-      const name = typeof body?.name === "string" ? normalizeDeifName(body.name) : null;
+      const name = typeof body?.name === "string" ? normalizeWorkFmName(body.name) : null;
       if (!name) return json({ error: "a name (1-24 characters) is required" }, { status: 400 });
-      const token = createDeifSessionToken(name);
+      const token = createWorkFmSessionToken(name);
       return json(
         { name },
         {
           headers: {
-            "Set-Cookie": `${DEIF_SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`,
+            "Set-Cookie": `${WORKFM_SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`,
           },
         }
       );
     }
 
-    if (pathname === "/api/deif/me" && req.method === "GET") {
-      const identity = getDeifIdentity(req);
+    if (pathname === "/api/workfm/me" && req.method === "GET") {
+      const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
       return json({ name: identity.name });
     }
 
-    if (pathname === "/api/deif/logout" && req.method === "POST") {
+    if (pathname === "/api/workfm/logout" && req.method === "POST") {
       return json(
         { ok: true },
-        { headers: { "Set-Cookie": `${DEIF_SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0` } }
+        { headers: { "Set-Cookie": `${WORKFM_SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0` } }
       );
     }
 
-    // --- DEIF FM queue ---
-    if (pathname === "/api/deif/queue" && req.method === "GET") {
-      const identity = getDeifIdentity(req);
-      return json(deifQueueStream.list(identity?.name));
+    // --- WorkFM rooms ---
+    if (pathname === "/api/workfm/rooms" && req.method === "GET") {
+      return json(listWorkFmRooms());
     }
 
-    if (pathname === "/api/deif/queue" && req.method === "POST") {
-      const identity = getDeifIdentity(req);
+    if (pathname === "/api/workfm/rooms" && req.method === "POST") {
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const body = await req.json().catch(() => null);
+      if (typeof body?.name !== "string" || !body.name.trim()) {
+        return json({ error: "a room name is required" }, { status: 400 });
+      }
+      try {
+        const room = createWorkFmRoom(body.name, identity.name);
+        return json({ slug: room.slug, name: room.name, createdAt: room.createdAt, createdBy: room.createdBy }, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to create room" }, { status: 400 });
+      }
+    }
+
+    const workfmRoomMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)$/);
+    if (workfmRoomMatch && req.method === "DELETE") {
+      if (!requireAuth(req)) return unauthorized();
+      const removed = await removeWorkFmRoom(decodeURIComponent(workfmRoomMatch[1]!));
+      return removed ? json({ ok: true }) : json({ error: "room not found" }, { status: 404 });
+    }
+
+    // --- WorkFM per-room queue ---
+    const workfmRoomQueueMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue$/);
+    if (workfmRoomQueueMatch && req.method === "GET") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
+      return json({ ...room.stream.list(identity?.name), roomName: room.name });
+    }
+
+    if (workfmRoomQueueMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const body = await req.json().catch(() => null);
       if (typeof body?.url !== "string" || !body.url.trim()) {
         return json({ error: "url required" }, { status: 400 });
       }
       try {
-        const item = await deifQueueStream.addToQueue(body.url.trim(), identity.name);
+        const item = await room.stream.addToQueue(body.url.trim(), identity.name);
         return json(item, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to add to queue" }, { status: 400 });
       }
     }
 
-    if (pathname === "/api/deif/queue/upload" && req.method === "POST") {
-      const identity = getDeifIdentity(req);
+    const workfmRoomUploadMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/upload$/);
+    if (workfmRoomUploadMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomUploadMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const formData = await req.formData().catch(() => null);
       const file = formData?.get("file");
       if (!(file instanceof File)) return json({ error: "an mp3 file is required" }, { status: 400 });
+      const saveForLaterRaw = formData?.get("saveForLater");
+      const saveForLater = saveForLaterRaw === null || saveForLaterRaw === undefined || saveForLaterRaw === "true";
+      const titleRaw = formData?.get("title");
+      const artistRaw = formData?.get("artist");
+      const overrides = {
+        title: typeof titleRaw === "string" ? titleRaw : undefined,
+        artist: typeof artistRaw === "string" ? artistRaw : undefined,
+      };
       try {
-        const item = await deifQueueStream.addUploadToQueue(file, identity.name);
+        const item = await room.stream.addUploadToQueue(file, identity.name, saveForLater, overrides);
         return json(item, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to upload" }, { status: 400 });
       }
     }
 
-    const deifQueueItemMatch = pathname.match(/^\/api\/deif\/queue\/(\d+)$/);
-    if (deifQueueItemMatch && req.method === "DELETE") {
-      const identity = getDeifIdentity(req);
+    const workfmRoomQueueItemMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/(\d+)$/);
+    if (workfmRoomQueueItemMatch && req.method === "DELETE") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueItemMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
-      const result = deifQueueStream.removeFromQueue(Number(deifQueueItemMatch[1]), identity.name);
+      const result = room.stream.removeFromQueue(Number(workfmRoomQueueItemMatch[2]), identity.name);
       return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
     }
 
-    if (pathname === "/api/deif/queue/current/skip" && req.method === "POST") {
-      const identity = getDeifIdentity(req);
+    const workfmRoomSkipMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/current\/skip$/);
+    if (workfmRoomSkipMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomSkipMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
-      const result = deifQueueStream.requestSkip(identity.name);
+      const result = room.stream.requestSkip(identity.name);
       return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
+    }
+
+    const workfmRoomChatMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/chat$/);
+    if (workfmRoomChatMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomChatMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const body = await req.json().catch(() => null);
+      if (typeof body?.text !== "string" || !body.text.trim()) {
+        return json({ error: "message can't be empty" }, { status: 400 });
+      }
+      try {
+        const message = room.stream.postChatMessage(identity.name, body.text);
+        return json(message, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to send message" }, { status: 400 });
+      }
+    }
+
+    const workfmRoomRequeueMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/requeue$/);
+    if (workfmRoomRequeueMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomRequeueMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const body = await req.json().catch(() => null);
+      if (typeof body?.id !== "string" || !body.id.trim()) {
+        return json({ error: "a library track id is required" }, { status: 400 });
+      }
+      const entry = getLibraryTrack(body.id);
+      if (!entry) return json({ error: "track not found" }, { status: 404 });
+      try {
+        const item = room.stream.requeueFromLibrary(entry, identity.name);
+        return json(item, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to requeue" }, { status: 400 });
+      }
+    }
+
+    // --- WorkFM library (history / most-liked / saved uploads — global, across all rooms) ---
+    if (pathname === "/api/workfm/library" && req.method === "GET") {
+      const identity = getWorkFmIdentity(req);
+      const view = url.searchParams.get("view") ?? "history";
+      if (view === "most-liked") return json(listMostLiked(identity?.name));
+      if (view === "saved") return json(listSavedUploads(identity?.name));
+      return json(listHistory(identity?.name));
+    }
+
+    const workfmLikeMatch = pathname.match(/^\/api\/workfm\/library\/([^/]+)\/like$/);
+    if (workfmLikeMatch && req.method === "POST") {
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const result = toggleLike(decodeURIComponent(workfmLikeMatch[1]!), identity.name);
+      if (!result) return json({ error: "track not found" }, { status: 404 });
+      return json(result);
     }
 
     // --- Stations CRUD ---
@@ -384,16 +508,14 @@ console.log(`cliamp-radio server listening on http://0.0.0.0:${PORT}`);
 // second yt-dlp/ffmpeg startup delay — the moment a first listener connects.
 prewarmAllPlaylistStreams().catch((err) => console.error("[prewarm] failed at startup:", err));
 
-// Ensure the "DEIF RADIO" station (with its DEIF FM queue channel) exists,
-// and start the queue's playback loop so it's ready the instant the first
-// video is queued.
-ensureDeifStation()
-  .then(() => deifQueueStream.start())
-  .catch((err) => console.error("[deif] failed to set up DEIF RADIO station:", err));
+// Note: WorkFM rooms are created on demand (see lib/workfmRooms.ts) — there's
+// no fixed station to pre-warm at startup; each room starts its own
+// playback loop the moment it's created.
+startWorkFmRoomSweeper();
 
 function shutdown() {
   stopAllPlaylistStreams();
-  deifQueueStream.stop();
+  stopAllWorkFmRooms();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

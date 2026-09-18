@@ -6,7 +6,7 @@ const YT_HOSTNAMES = /(^|\.)youtube\.com$|(^|\.)music\.youtube\.com$|(^|\.)youtu
 // to confirm you're not a bot" unless yt-dlp presents cookies from a real,
 // signed-in browser session. Two ways to supply them, checked in this order
 // (shared by every yt-dlp invocation across the server — playlist streaming
-// and the DEIF FM queue alike):
+// and the WorkFM queue alike):
 //
 // 1. YTDLP_COOKIES_FROM_BROWSER (recommended): a value like
 //    "chromium:/path/to/profile-dir" pointing at a real browser profile kept

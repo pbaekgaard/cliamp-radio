@@ -1,28 +1,38 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { attachSavedUpload, recordPlay, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
-// DEIF FM: a single, always-on "radio" station whose playlist is a live,
+// WorkFM: an always-on "radio" queue engine whose playlist is a live,
 // public request queue instead of a fixed list of tracks. Anyone can add a
-// YouTube video (after picking a display name — see deifIdentity.ts); videos
+// YouTube video (after picking a display name — see workfmIdentity.ts); videos
 // play back-to-back in the order they were added (FIFO, no shuffling) and
 // are broadcast to every listener at the same playback position, the same
 // way playlistStream.ts does for the fixed-playlist stations. When the
 // queue runs dry, playback just pauses (no bytes sent) until the next video
-// is added — there's no "idle timeout" teardown here, since this is meant
-// to always be ready to pick back up the instant someone queues something.
+// is added — there's no "idle timeout" teardown of *playback* here, since
+// this is meant to always be ready to pick back up the instant someone
+// queues something. (Whole *rooms* — see workfmRooms.ts, which each own one
+// WorkFmQueueStream instance — do get torn down after being empty a while.)
 // ---------------------------------------------------------------------------
 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
-const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "deif-uploads");
+const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
+const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
+const MAX_CHAT_MESSAGE_LENGTH = 500;
+// How long a named visitor is considered "in the room" after their last
+// GET /queue poll (see touchPresence()/list() below) before they're
+// considered gone — comfortably longer than the client's ~1.5s poll
+// interval so a slow network blip doesn't make someone flicker in and out.
+const PRESENCE_TIMEOUT_MS = 10 * 1000;
 // A "listener" is someone whose browser currently has an open connection to
-// the actual /cliamp-radio/live/deif-fm.mp3 audio stream (i.e. they clicked
-// "Listen live" and are still playing it) — see subscribe() below. Merely
-// having the /deif page open (which polls the queue for now-playing/queue
+// the actual audio stream (i.e. they clicked "Listen live" and are still
+// playing it, or are tuned in via cliamp) — see subscribe() below. Merely
+// having the /workfm page open (which polls the queue for now-playing/queue
 // updates) does *not* count; that would inflate the count with people who
 // are just browsing the page without actually listening. Used both for the
 // listeners list and as the denominator for the skip-vote majority below.
@@ -36,8 +46,27 @@ export interface QueueItem {
   addedBy: string;
   addedAt: number;
   /** "youtube" (default) plays via yt-dlp; "upload" plays a locally-stored
-   * mp3 (see uploadFiles below) that's deleted once it's done playing. */
+   * mp3 (see diskPath) that's deleted once it's done playing, unless
+   * saveForLater is set (see addUploadToQueue). */
   source: "youtube" | "upload";
+  /** Stable id used for likes/history/most-liked/requeue in workfmLibrary.ts:
+   * "yt:<videoId>" (shared across every room/queue of the same video) or
+   * "up:<uuid>" (unique per upload). */
+  libraryId: string;
+  /** Upload-only: whether to persist the file to workfmLibrary's saved-uploads
+   * store after it finishes playing, instead of deleting it right away. */
+  saveForLater?: boolean;
+  /** Upload-only: where the file currently lives on disk — either this
+   * room's fresh-upload dir, or workfmLibrary's persistent saved-uploads dir
+   * (for tracks requeued from the library). */
+  diskPath?: string;
+}
+
+interface ChatMessage {
+  id: number;
+  name: string;
+  text: string;
+  at: number;
 }
 
 interface Subscriber {
@@ -45,7 +74,7 @@ interface Subscriber {
   wantsMeta: boolean;
   bytesSinceMeta: number;
   lastSentMeta: string;
-  /** The listener's DEIF display name, if they'd identified themselves before tuning in. */
+  /** The listener's WorkFM display name, if they'd identified themselves before tuning in. */
   name?: string;
 }
 
@@ -92,7 +121,7 @@ function titleFromFilename(filename: string): { artist: string; title: string } 
   return { artist: "Uploaded", title: base || "Untitled upload" };
 }
 
-class DeifQueueStream {
+class WorkFmQueueStream {
   private subscribers = new Set<Subscriber>();
   private queue: QueueItem[] = [];
   private current: QueueItem | null = null;
@@ -100,21 +129,67 @@ class DeifQueueStream {
   private started = false;
   private currentGen = 0;
   private nextId = 1;
-  private waiters: Array<() => void> = [];
   private ytdlpProc: ReturnType<typeof Bun.spawn> | null = null;
   private ffmpegProc: ReturnType<typeof Bun.spawn> | null = null;
   private skipVotes = new Set<string>(); // names who voted to skip the current track
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
+  private chat: ChatMessage[] = [];
+  private nextChatId = 1;
+  // name -> last time (ms since epoch) they polled GET /queue for this room.
+  // This is how "who's in the room" is tracked — separate from who's
+  // actually streaming audio (subscribers) — see touchPresence()/members().
+  private presence = new Map<string, number>();
+  // Timestamp since this room has had nobody around at all (no audio-stream
+  // subscribers AND nobody polling the page — see emptySince getter below),
+  // or null while someone's present. Starts "empty" at construction —
+  // workfmRooms.ts uses this to auto-remove rooms nobody's actually using.
+  private _emptySince: number | null = Date.now();
 
   get status() {
     return {
       running: this.current !== null,
       listeners: this.subscribers.size,
+      members: this.activeMemberNames().length,
       nowPlaying: this.current
         ? { id: this.current.id, artist: this.current.artist, title: this.current.title, addedBy: this.current.addedBy }
         : null,
       queueLength: this.queue.length,
     };
+  }
+
+  /** How long (ms since epoch) this room has had nobody around — neither
+   * streaming the audio nor with the page open — or null if anyone's
+   * present right now. Recomputed on access (see activeMemberNames()),
+   * so it stays accurate even if nobody's polled recently. */
+  get emptySince(): number | null {
+    const isEmpty = this.subscribers.size === 0 && this.activeMemberNames().length === 0;
+    if (isEmpty) {
+      if (this._emptySince === null) this._emptySince = Date.now();
+    } else {
+      this._emptySince = null;
+    }
+    return this._emptySince;
+  }
+
+  /** Records that `name` just polled the room (i.e. has the page open),
+   * refreshing how long they count as "in the room" — see PRESENCE_TIMEOUT_MS. */
+  private touchPresence(name?: string) {
+    if (!name) return;
+    this.presence.set(name, Date.now());
+  }
+
+  /** Distinct names who've polled within PRESENCE_TIMEOUT_MS, sorted —
+   * expired entries are garbage-collected as a side effect. This is "who's
+   * actually in the room right now", independent of whether they're
+   * streaming the audio. */
+  private activeMemberNames(): string[] {
+    const now = Date.now();
+    const names: string[] = [];
+    for (const [name, lastSeen] of this.presence) {
+      if (now - lastSeen > PRESENCE_TIMEOUT_MS) this.presence.delete(name);
+      else names.push(name);
+    }
+    return names.sort((a, b) => a.localeCompare(b));
   }
 
   /** Distinct display names of everyone currently connected to the actual audio
@@ -129,10 +204,10 @@ class DeifQueueStream {
     return [...names].sort((a, b) => a.localeCompare(b));
   }
 
-  /** Count of audio-stream connections with no DEIF identity attached — this
+  /** Count of audio-stream connections with no WorkFM identity attached — this
    * is how cliamp (the desktop/native player, which just requests the raw
    * mp3 stream and never carries a browser session cookie) shows up, as
-   * well as anyone browsing /deif and hitting "Listen live" without joining. */
+   * well as anyone browsing /workfm and hitting "Listen live" without joining. */
   private anonymousListenerCount(): number {
     let count = 0;
     for (const sub of this.subscribers) {
@@ -146,33 +221,52 @@ class DeifQueueStream {
     queue: QueueItem[];
     listeners: string[];
     anonymousListeners: number;
+    members: { name: string; listening: boolean }[];
     skipVote: { votes: number; total: number; hasVoted: boolean };
+    chat: ChatMessage[];
   } {
+    this.touchPresence(viewerName);
     const listeners = this.listenerNames();
+    const listening = new Set(listeners);
+    const members = this.activeMemberNames().map((name) => ({ name, listening: listening.has(name) }));
     return {
       nowPlaying: this.current,
       queue: [...this.queue],
       listeners,
       anonymousListeners: this.anonymousListenerCount(),
+      members,
       skipVote: {
         votes: this.skipVotes.size,
         total: Math.max(listeners.length, 1),
         hasVoted: !!viewerName && this.skipVotes.has(viewerName.toLowerCase()),
       },
+      chat: this.chat,
     };
+  }
+
+
+  /** Posts a chat message from `name`; trims/caps length and rolls off the
+   * oldest message once MAX_CHAT_MESSAGES is exceeded. */
+  postChatMessage(name: string, text: string): ChatMessage {
+    const trimmed = text.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
+    if (!trimmed) throw new Error("message can't be empty");
+    const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now() };
+    this.chat.push(message);
+    if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    return message;
   }
 
   /** Starts the perpetual playback loop the first time it's called; safe to call repeatedly. */
   start() {
     if (this.started) return;
     this.started = true;
-    this.loop().catch((err) => console.error("[deif-queue] loop crashed:", err));
+    this.loop().catch((err) => console.error("[workfm-queue] loop crashed:", err));
   }
 
-  /** `name` is the listener's DEIF display name (if identified) — passed in
+  /** `name` is the listener's WorkFM display name (if identified) — passed in
    * from the request's identity cookie in index.ts so the listeners list
    * only reflects people actually tuned into the audio stream, not just
-   * anyone with the /deif page open. */
+   * anyone with the /workfm page open. */
   subscribe(wantsMeta: boolean, name?: string): ReadableStream<Uint8Array> {
     const self = this;
     let sub: Subscriber;
@@ -204,20 +298,27 @@ class DeifQueueStream {
       addedBy,
       addedAt: Date.now(),
       source: "youtube",
+      libraryId: `yt:${videoId}`,
     };
     this.queue.push(item);
-    this.wakeWaiters();
     this.start();
     return item;
   }
 
   /**
-   * Saves an uploaded mp3 to disk and adds it to the queue. The file is
-   * deleted once it's done playing (see loop()) or if it's removed from
-   * the queue before its turn (see removeFromQueue()) — uploads never
-   * linger on disk longer than they need to.
+   * Saves an uploaded mp3 to disk and adds it to the queue. Unless
+   * `saveForLater` is false, the file is moved into workfmLibrary's
+   * persistent saved-uploads store once it finishes playing so it can be
+   * requeued later (for up to ~2 months); otherwise it's deleted right
+   * away, same as before — either way it never lingers in this room's
+   * temporary upload dir past its turn.
    */
-  async addUploadToQueue(file: File, addedBy: string): Promise<QueueItem> {
+  async addUploadToQueue(
+    file: File,
+    addedBy: string,
+    saveForLater = true,
+    overrides?: { title?: string; artist?: string },
+  ): Promise<QueueItem> {
     if (this.queue.length >= MAX_QUEUE_LENGTH) throw new Error("the queue is full — try again once it's shorter");
     const name = file.name || "upload.mp3";
     const looksLikeMp3 = /\.mp3$/i.test(name) || file.type === "audio/mpeg" || file.type === "audio/mp3";
@@ -229,14 +330,59 @@ class DeifQueueStream {
 
     await mkdir(UPLOADS_DIR, { recursive: true });
     const id = this.nextId++;
+    const libraryId = `up:${crypto.randomUUID()}`;
     const diskPath = path.join(UPLOADS_DIR, `${id}-${crypto.randomUUID()}.mp3`);
     await writeFile(diskPath, new Uint8Array(await file.arrayBuffer()));
     this.uploadFiles.set(id, diskPath);
 
-    const { artist, title } = titleFromFilename(name);
-    const item: QueueItem = { id, videoId: "", url: "", artist, title, addedBy, addedAt: Date.now(), source: "upload" };
+    // The uploader can type over whichever of title/artist they want (e.g.
+    // pulled from the mp3's ID3 tags client-side); anything left blank
+    // falls back to guessing from the filename, same as before.
+    const guessed = titleFromFilename(name);
+    const artist = overrides?.artist?.trim() || guessed.artist;
+    const title = overrides?.title?.trim() || guessed.title;
+    const item: QueueItem = {
+      id,
+      videoId: "",
+      url: "",
+      artist,
+      title,
+      addedBy,
+      addedAt: Date.now(),
+      source: "upload",
+      libraryId,
+      saveForLater,
+      diskPath,
+    };
     this.queue.push(item);
-    this.wakeWaiters();
+    this.start();
+    return item;
+  }
+
+  /**
+   * Reconstructs a queue entry from a previously-saved library upload (see
+   * workfmLibrary.ts's listSavedUploads) and adds it to this room's queue,
+   * pointing straight at the shared saved file — it's deliberately not
+   * registered in `uploadFiles`, so cleanup after play never deletes the
+   * shared/retained asset (only the retention sweep in workfmLibrary.ts does).
+   */
+  requeueFromLibrary(entry: LibraryTrack, addedBy: string): QueueItem {
+    if (this.queue.length >= MAX_QUEUE_LENGTH) throw new Error("the queue is full — try again once it's shorter");
+    if (entry.source !== "upload" || !entry.savedFilePath) throw new Error("that track is no longer available");
+    const item: QueueItem = {
+      id: this.nextId++,
+      videoId: "",
+      url: "",
+      artist: entry.artist,
+      title: entry.title,
+      addedBy,
+      addedAt: Date.now(),
+      source: "upload",
+      libraryId: entry.id,
+      saveForLater: true, // keep it saved — requeuing shouldn't shorten its retention
+      diskPath: entry.savedFilePath,
+    };
+    this.queue.push(item);
     this.start();
     return item;
   }
@@ -249,7 +395,31 @@ class DeifQueueStream {
     try {
       await rm(filePath, { force: true });
     } catch (err) {
-      console.error(`[deif-queue] failed to delete uploaded file ${filePath}:`, err);
+      console.error(`[workfm-queue] failed to delete uploaded file ${filePath}:`, err);
+    }
+  }
+
+  /** Moves a fresh upload's file into workfmLibrary's persistent saved-uploads
+   * store (instead of deleting it) once it's done playing, and records the
+   * retention window there. A no-op (falls back to normal delete) if the
+   * item isn't registered in `uploadFiles` — e.g. it was requeued from the
+   * library and already lives there. */
+  private async persistUploadForLater(item: QueueItem) {
+    const filePath = this.uploadFiles.get(item.id);
+    this.uploadFiles.delete(item.id);
+    if (!filePath) return; // already a shared/persistent file — nothing to move
+    try {
+      await mkdir(SAVED_UPLOADS_DIR, { recursive: true });
+      const savedPath = path.join(SAVED_UPLOADS_DIR, `${item.libraryId.replace(/[^a-zA-Z0-9_-]/g, "")}.mp3`);
+      await rename(filePath, savedPath);
+      attachSavedUpload(item.libraryId, savedPath, Date.now() + SAVED_UPLOAD_TTL_MS);
+    } catch (err) {
+      console.error(`[workfm-queue] failed to persist saved upload ${filePath}:`, err);
+      try {
+        await rm(filePath, { force: true });
+      } catch {
+        // already gone
+      }
     }
   }
 
@@ -317,34 +487,42 @@ class DeifQueueStream {
     }
   }
 
-  private wakeWaiters() {
-    const waiters = this.waiters;
-    this.waiters = [];
-    for (const resolve of waiters) resolve();
-  }
-
-  private waitForItem(): Promise<void> {
-    return new Promise((resolve) => this.waiters.push(resolve));
-  }
-
   private async loop() {
     while (true) {
       if (this.queue.length === 0) {
         this.current = null;
-        await this.waitForItem();
+        this.currentMetaString = "WorkFM - waiting for requests";
+        const gen = ++this.currentGen;
+        try {
+          await this.playSilence(gen);
+        } catch (err) {
+          console.error("[workfm-queue] silence generator failed:", err);
+        }
         continue;
       }
       const item = this.queue.shift()!;
       this.current = item;
       this.currentMetaString = `${item.artist} - ${item.title}`;
       this.skipVotes.clear();
+      recordPlay({
+        libraryId: item.libraryId,
+        source: item.source,
+        videoId: item.videoId,
+        url: item.url,
+        artist: item.artist,
+        title: item.title,
+        addedBy: item.addedBy,
+      });
       const gen = ++this.currentGen;
       try {
         await this.playEntry(item, gen);
       } catch (err) {
-        console.error(`[deif-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
+        console.error(`[workfm-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
       } finally {
-        if (item.source === "upload") this.cleanupUpload(item.id).catch(() => {});
+        if (item.source === "upload") {
+          if (item.saveForLater) this.persistUploadForLater(item).catch(() => {});
+          else this.cleanupUpload(item.id).catch(() => {});
+        }
       }
     }
   }
@@ -405,7 +583,7 @@ class DeifQueueStream {
 
   /** Plays a locally-uploaded mp3 straight through ffmpeg (no yt-dlp needed). */
   private async playUpload(entry: QueueItem, gen: number): Promise<void> {
-    const filePath = this.uploadFiles.get(entry.id);
+    const filePath = entry.diskPath;
     if (!filePath) throw new Error("uploaded file is missing");
 
     // `-re` paces output to real playback speed, same as the YouTube path.
@@ -429,6 +607,39 @@ class DeifQueueStream {
       if (ffExit !== 0 && this.currentGen === gen) {
         const ffErr = (await ffmpegStderr).trim();
         throw new Error(`ffmpeg exited with code ${ffExit}` + (ffErr ? `\nffmpeg stderr: ${ffErr}` : ""));
+      }
+    } finally {
+      this.ffmpegProc = null;
+      try {
+        ffmpeg.kill();
+      } catch {
+        // already exited
+      }
+    }
+  }
+
+  /**
+   * Streams silence to subscribers whenever the queue is empty, so
+   * connections — including cliamp and other native clients, which have no
+   * way to auto-reconnect — stay open instead of the stream going dead and
+   * forcing a manual rejoin once a new track is added. Exits (and its
+   * ffmpeg process is killed) the moment something's queued.
+   */
+  private async playSilence(gen: number): Promise<void> {
+    const ffmpeg = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", ...AUDIO_ARGS, "pipe:1"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    this.ytdlpProc = null;
+    this.ffmpegProc = ffmpeg;
+
+    try {
+      const reader = ffmpeg.stdout.getReader();
+      while (true) {
+        if (this.currentGen !== gen || this.queue.length > 0) return; // a track's been queued
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) this.broadcast(value);
       }
     } finally {
       this.ffmpegProc = null;
@@ -487,6 +698,20 @@ class DeifQueueStream {
       // ignore
     }
   }
+
+  /**
+   * Fully tears down this room: stops any in-flight playback and deletes
+   * any uploaded-but-not-yet-played files. Only called once a room's been
+   * empty long enough to be auto-removed (see workfmRooms.ts) — there are no
+   * subscribers left to disturb by definition.
+   */
+  async destroy() {
+    this.stop();
+    for (const id of [...this.uploadFiles.keys()]) {
+      await this.cleanupUpload(id);
+    }
+    this.queue = [];
+  }
 }
 
-export const deifQueueStream = new DeifQueueStream();
+export { WorkFmQueueStream };

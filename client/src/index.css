@@ -736,14 +736,14 @@ input {
   margin-bottom: 8px;
 }
 
-/* --- DEIF FM --- */
-.deif-page {
+/* --- WorkFM --- */
+.workfm-page {
   max-width: 980px;
   margin: 0 auto;
   padding: 32px 20px 60px;
 }
 
-.deif-header {
+.workfm-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -751,33 +751,136 @@ input {
   margin-bottom: 20px;
 }
 
-.deif-join-form {
+.workfm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.workfm-modal {
+  background: var(--panel);
+  border-radius: 18px;
+  padding: 36px 40px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.workfm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 26px;
+}
+
+.workfm-modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.workfm-modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.workfm-modal-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.workfm-modal-step-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workfm-modal-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.workfm-modal-step.active {
+  background: var(--accent);
+  color: #05070d;
+}
+
+.workfm-modal-step.done {
+  background: var(--accent-dim);
+  color: #05070d;
+}
+
+.workfm-modal-step-line {
+  width: 40px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.workfm-modal-step-line.done {
+  background: var(--accent-dim);
+}
+
+.workfm-modal-form {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 18px;
 }
 
-.deif-join-form-row {
+.workfm-modal-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workfm-modal-form input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+}
+
+.workfm-modal-actions {
   display: flex;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
 }
 
-.deif-join-form input {
-  width: 160px;
+.workfm-modal-actions .btn-primary,
+.workfm-modal-actions .btn-secondary {
+  padding: 12px 20px;
 }
 
-.deif-layout {
+.workfm-layout {
   display: flex;
-  gap: 24px;
+  gap: 32px;
   align-items: flex-start;
 }
 
-.deif-main {
+.workfm-main {
   flex: 1;
   min-width: 0;
 }
 
-.deif-listeners-panel {
+.workfm-listeners-panel {
   flex-shrink: 0;
   width: 220px;
   background: var(--panel);
@@ -787,12 +890,12 @@ input {
   top: 84px;
 }
 
-.deif-listeners-heading {
+.workfm-listeners-heading {
   margin: 0 0 12px;
   font-size: 15px;
 }
 
-.deif-listeners-list {
+.workfm-listeners-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -801,37 +904,53 @@ input {
   margin: 0;
 }
 
-.deif-listener-row {
+.workfm-listener-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   font-size: 14px;
 }
 
-.deif-vote-active {
+.workfm-listening-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent, #7cf7c4);
+  background: rgba(124, 247, 196, 0.14);
+  border: 1px solid rgba(124, 247, 196, 0.35);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.workfm-vote-active {
   background: rgba(124, 247, 196, 0.18);
   color: var(--accent, #7cf7c4);
 }
 
-.deif-vote-hint {
+.workfm-vote-hint {
   margin: 8px 0 0;
 }
 
 @media (max-width: 720px) {
-  .deif-layout {
+  .workfm-layout {
     flex-direction: column;
   }
-  .deif-listeners-panel {
+  .workfm-listeners-panel {
     width: 100%;
     position: static;
   }
 }
 
-.deif-now-playing {
+.workfm-now-playing {
   margin-bottom: 24px;
 }
 
-.deif-now-playing-label {
+.workfm-now-playing-label {
   margin: 0 0 8px;
   font-size: 13px;
   text-transform: uppercase;
@@ -839,7 +958,7 @@ input {
   color: var(--muted);
 }
 
-.deif-now-playing-card {
+.workfm-now-playing-card {
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 20px;
@@ -849,44 +968,44 @@ input {
   gap: 12px;
 }
 
-.deif-now-playing-title {
+.workfm-now-playing-title {
   font-weight: 700;
   font-size: 17px;
 }
 
-.deif-add-form {
+.workfm-add-form {
   display: flex;
   gap: 10px;
   margin-bottom: 8px;
 }
 
-.deif-add-form input {
+.workfm-add-form input {
   flex: 1;
 }
 
-.deif-upload-row {
+.workfm-upload-row {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
 }
 
-.deif-upload-label {
+.workfm-upload-label {
   cursor: pointer;
   white-space: nowrap;
 }
 
-.deif-upload-badge {
+.workfm-upload-badge {
   color: var(--muted);
   font-style: italic;
 }
 
-.deif-queue-heading {
+.workfm-queue-heading {
   margin: 24px 0 12px;
   font-size: 16px;
 }
 
-.deif-queue-list {
+.workfm-queue-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -895,7 +1014,7 @@ input {
   margin: 0;
 }
 
-.deif-queue-row {
+.workfm-queue-row {
   background: var(--panel);
   border-radius: 10px;
   padding: 12px 16px;
@@ -905,34 +1024,180 @@ input {
   gap: 12px;
 }
 
-.deif-queue-row-info {
+.workfm-queue-row-info {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.deif-queue-title {
+.workfm-queue-title {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.deif-queue-artist {
+.workfm-queue-artist {
   color: var(--muted);
   font-size: 13px;
 }
 
-.deif-queue-row-meta {
+.workfm-queue-row-meta {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
 }
 
-.deif-remove-btn {
+.workfm-remove-btn {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.workfm-back-link {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.workfm-save-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.workfm-sidebar {
+  flex-shrink: 0;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 84px;
+  align-self: stretch;
+}
+
+.workfm-listeners-panel,
+.workfm-chat-panel,
+.workfm-library-panel {
+  width: 100%;
+}
+
+.workfm-chat-panel {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 520px;
+}
+
+.workfm-chat-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.workfm-chat-row span {
+  word-break: break-word;
+}
+
+.workfm-chat-form {
+  display: flex;
+  gap: 8px;
+}
+
+.workfm-chat-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.workfm-library-panel {
+  margin-top: 24px;
+}
+
+.workfm-library-body {
+  margin-top: 12px;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.workfm-library-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.workfm-library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workfm-library-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.workfm-library-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.workfm-rooms-list {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workfm-room-row {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.workfm-room-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  .workfm-sidebar {
+    width: 100%;
+    position: static;
+  }
 }
 
 /* --- Tune in (browser radio player) --- */
