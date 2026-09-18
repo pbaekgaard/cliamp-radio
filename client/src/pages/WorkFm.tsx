@@ -942,18 +942,24 @@ function RoomPage({ slug }: { slug: string }) {
                     <button
                       className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
                       onClick={skip}
+                      title={
+                        state.skipVote.hasVoted
+                          ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                          : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                      }
                     >
-                      {state.skipVote.hasVoted
-                        ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                        : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
+                      󰒬 {state.skipVote.votes}/{state.skipVote.total}
                     </button>
                     <button
                       className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
                       onClick={repeat}
+                      title={
+                        state.repeatVote.hasVoted
+                          ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                          : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                      }
                     >
-                      {state.repeatVote.hasVoted
-                        ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                        : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`}
+                      󰑖 {state.repeatVote.votes}/{state.repeatVote.total}
                     </button>
                   </div>
                 )}
