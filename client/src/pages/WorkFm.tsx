@@ -771,6 +771,7 @@ function RoomPage({ slug }: { slug: string }) {
     members: [],
     leaderboard: [],
     skipVote: { votes: 0, total: 1, hasVoted: false },
+    repeatVote: { armed: false, votes: 0, total: 1, hasVoted: false },
     chat: [],
   });
   const [roomMissing, setRoomMissing] = useState(false);
@@ -827,6 +828,15 @@ function RoomPage({ slug }: { slug: string }) {
   async function skip() {
     try {
       await api.workfmSkipCurrent(slug);
+      poll();
+    } catch {
+      // ignore — poll() will resync
+    }
+  }
+
+  async function repeat() {
+    try {
+      await api.workfmRepeatCurrent(slug);
       poll();
     } catch {
       // ignore — poll() will resync
@@ -939,6 +949,18 @@ function RoomPage({ slug }: { slug: string }) {
                           ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
                           : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
                     </button>
+                    <button
+                      className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
+                      onClick={repeat}
+                    >
+                      {isMineNowPlaying
+                        ? state.repeatVote.armed
+                          ? "🔁 Repeat: on"
+                          : "🔁 Repeat"
+                        : state.repeatVote.hasVoted
+                          ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                          : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`}
+                    </button>
                   </div>
                 )}
               </div>
@@ -949,6 +971,9 @@ function RoomPage({ slug }: { slug: string }) {
               <p className="muted workfm-vote-hint">
                 Needs {majorityNeeded} of {state.skipVote.total} listening now to skip (a 50/50 split skips too).
               </p>
+            )}
+            {name && state.nowPlaying && state.repeatVote.armed && (
+              <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
             )}
           </div>
 

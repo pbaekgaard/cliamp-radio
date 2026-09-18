@@ -107,6 +107,13 @@ export interface WorkFmSkipVoteState {
   hasVoted: boolean;
 }
 
+export interface WorkFmRepeatVoteState {
+  armed: boolean;
+  votes: number;
+  total: number;
+  hasVoted: boolean;
+}
+
 export interface WorkFmMember {
   name: string;
   /** Whether this person is currently connected to the audio stream, as
@@ -138,6 +145,7 @@ export interface WorkFmQueueState {
   /** Top 5 (by like count) songs played in *this* room this session. */
   leaderboard: WorkFmLeaderboardEntry[];
   skipVote: WorkFmSkipVoteState;
+  repeatVote: WorkFmRepeatVoteState;
   chat: WorkFmChatMessage[];
 }
 
@@ -155,6 +163,14 @@ export interface WorkFmRoomSummary {
 export interface WorkFmSkipResult {
   ok: true;
   skipped?: boolean;
+  votes?: number;
+  total?: number;
+  hasVoted?: boolean;
+}
+
+export interface WorkFmRepeatResult {
+  ok: true;
+  armed?: boolean;
   votes?: number;
   total?: number;
   hasVoted?: boolean;
@@ -264,6 +280,7 @@ export const api = {
   },
   workfmRemoveFromQueue: (slug: string, id: number) => request(`/api/workfm/rooms/${slug}/queue/${id}`, { method: "DELETE" }),
   workfmSkipCurrent: (slug: string) => request<WorkFmSkipResult>(`/api/workfm/rooms/${slug}/queue/current/skip`, { method: "POST" }),
+  workfmRepeatCurrent: (slug: string) => request<WorkFmRepeatResult>(`/api/workfm/rooms/${slug}/queue/current/repeat`, { method: "POST" }),
   workfmPostChat: (slug: string, text: string) =>
     request<WorkFmChatMessage>(`/api/workfm/rooms/${slug}/chat`, { method: "POST", body: JSON.stringify({ text }) }),
   workfmRequeue: (slug: string, id: string) =>

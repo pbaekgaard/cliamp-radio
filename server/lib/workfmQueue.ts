@@ -132,6 +132,8 @@ class WorkFmQueueStream {
   private ytdlpProc: ReturnType<typeof Bun.spawn> | null = null;
   private ffmpegProc: ReturnType<typeof Bun.spawn> | null = null;
   private skipVotes = new Set<string>(); // names who voted to skip the current track
+  private repeatVotes = new Set<string>(); // names who voted to repeat the current track
+  private repeatArmed = false; // whether the current track will replay itself once it finishes
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
   private chat: ChatMessage[] = [];
   private nextChatId = 1;
@@ -283,6 +285,7 @@ class WorkFmQueueStream {
     members: { name: string; listening: boolean }[];
     leaderboard: ReturnType<WorkFmQueueStream["roomLeaderboard"]>;
     skipVote: { votes: number; total: number; hasVoted: boolean };
+    repeatVote: { armed: boolean; votes: number; total: number; hasVoted: boolean };
     chat: ChatMessage[];
   } {
     this.touchPresence(viewerName);
@@ -300,6 +303,12 @@ class WorkFmQueueStream {
         votes: this.skipVotes.size,
         total: Math.max(listeners.length, 1),
         hasVoted: !!viewerName && this.skipVotes.has(viewerName.toLowerCase()),
+      },
+      repeatVote: {
+        armed: this.repeatArmed,
+        votes: this.repeatVotes.size,
+        total: Math.max(listeners.length, 1),
+        hasVoted: !!viewerName && this.repeatVotes.has(viewerName.toLowerCase()),
       },
       chat: this.chat,
     };
@@ -524,6 +533,44 @@ class WorkFmQueueStream {
     return { ok: true, skipped: false, votes, total, hasVoted: this.skipVotes.has(name) };
   }
 
+  /**
+   * Votes to repeat the currently playing track — unlike skip, this can't
+   * take effect immediately (there's nothing to interrupt), so it just arms
+   * a flag that loop() checks once the track finishes naturally: if armed,
+   * the same item is reinserted at the front of the queue instead of moving
+   * on, so it plays again right away rather than being requeued behind
+   * whatever else gets added. The person who added the track can arm/disarm
+   * it instantly (same "instant" privilege as skip); anyone else votes, and
+   * it arms once votes reach a majority of currently-present listeners (or
+   * an exact 50/50 split). Armed/voted state resets whenever the track
+   * changes (see loop()).
+   */
+  requestRepeat(requestedBy: string): {
+    ok: boolean;
+    error?: string;
+    armed?: boolean;
+    votes?: number;
+    total?: number;
+    hasVoted?: boolean;
+  } {
+    if (!this.current) return { ok: false, error: "nothing is playing" };
+    const name = requestedBy.toLowerCase();
+
+    if (this.current.addedBy.toLowerCase() === name) {
+      this.repeatArmed = !this.repeatArmed;
+      return { ok: true, armed: this.repeatArmed };
+    }
+
+    // Toggle: voting again removes your vote, in case you change your mind.
+    if (this.repeatVotes.has(name)) this.repeatVotes.delete(name);
+    else this.repeatVotes.add(name);
+
+    const total = Math.max(this.listenerNames().length, 1);
+    const votes = this.repeatVotes.size;
+    this.repeatArmed = votes * 2 >= total;
+    return { ok: true, armed: this.repeatArmed, votes, total, hasVoted: this.repeatVotes.has(name) };
+  }
+
   /** Kills the in-flight yt-dlp/ffmpeg pair, which ends the current track's playback loop. */
   private killPlayback() {
     this.currentGen++; // invalidates the in-flight playEntry loop
@@ -556,6 +603,8 @@ class WorkFmQueueStream {
       this.current = item;
       this.currentMetaString = `${item.artist} - ${item.title}`;
       this.skipVotes.clear();
+      this.repeatVotes.clear();
+      this.repeatArmed = false;
       this.roomTrackAddedBy.set(item.libraryId, item.addedBy);
       recordPlay({
         libraryId: item.libraryId,
@@ -567,16 +616,24 @@ class WorkFmQueueStream {
         addedBy: item.addedBy,
       });
       const gen = ++this.currentGen;
+      let playedFully = false;
       try {
         await this.playEntry(item, gen);
+        playedFully = this.currentGen === gen; // false if killPlayback() (skip) fired mid-track
       } catch (err) {
         console.error(`[workfm-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
-      } finally {
+      }
+      if (playedFully && this.repeatArmed) {
+        // Reinsert the same item at the front so it plays again right away,
+        // instead of being requeued behind whatever else has been added —
+        // and skip the upload cleanup below since we still need the file.
+        this.queue.unshift(item);
+      } else if (item.source === "upload") {
         // The room's own temp copy is always cleaned up once played — if
         // saveForLater was set, a persistent copy was already written to
         // workfmLibrary's saved-uploads store at upload time (see
         // addUploadToQueue), so nothing else needs to happen here.
-        if (item.source === "upload") this.cleanupUpload(item.id).catch(() => {});
+        this.cleanupUpload(item.id).catch(() => {});
       }
     }
   }
