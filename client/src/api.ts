@@ -87,6 +87,11 @@ export interface WorkFmQueueItem {
   addedAt: number;
   source: "youtube" | "upload";
   libraryId: string;
+  /** Global (cross-room) like count/state from the library — see
+   * workfmLibrary.ts. Zero/false until the track's actually been played
+   * at least once anywhere. */
+  likes: number;
+  likedByMe: boolean;
 }
 
 export interface WorkFmChatMessage {
@@ -109,6 +114,21 @@ export interface WorkFmMember {
   listening: boolean;
 }
 
+export interface WorkFmLeaderboardEntry {
+  libraryId: string;
+  title: string;
+  artist: string;
+  likes: number;
+  likedByMe: boolean;
+  addedBy: string;
+  available: boolean;
+}
+
+export interface WorkFmTopDj {
+  name: string;
+  likes: number;
+}
+
 export interface WorkFmQueueState {
   roomName: string;
   nowPlaying: WorkFmQueueItem | null;
@@ -120,6 +140,10 @@ export interface WorkFmQueueState {
   /** Everyone currently present in the room (page open), each flagged with
    * whether they're also tuned into the audio stream right now. */
   members: WorkFmMember[];
+  /** Top 5 (by like count) songs played in *this* room this session. */
+  leaderboard: WorkFmLeaderboardEntry[];
+  /** Whoever added the most cumulatively-liked songs in this room this session. */
+  topDj: WorkFmTopDj | null;
   skipVote: WorkFmSkipVoteState;
   chat: WorkFmChatMessage[];
 }

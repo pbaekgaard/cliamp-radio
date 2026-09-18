@@ -3,12 +3,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   api,
   type WorkFmChatMessage,
+  type WorkFmLeaderboardEntry,
   type WorkFmLibraryTrack,
   type WorkFmLibraryView,
   type WorkFmMember,
   type WorkFmQueueItem,
   type WorkFmQueueState,
   type WorkFmRoomSummary,
+  type WorkFmTopDj,
 } from "../api";
 import { readId3Tags, titleFromFilename } from "../id3";
 import { useAuth } from "../AuthContext";
@@ -551,9 +553,127 @@ function ChatPanel({
   );
 }
 
+function SongLeaderboardPanel({
+  leaderboard,
+  topDj,
+  slug,
+  name,
+  onRequeued,
+}: {
+  leaderboard: WorkFmLeaderboardEntry[];
+  topDj: WorkFmTopDj | null;
+  slug: string;
+  name: string | null;
+  onRequeued: () => void;
+}) {
+  async function like(id: string) {
+    if (!name) return;
+    try {
+      await api.workfmToggleLike(id);
+      onRequeued();
+    } catch {
+      // ignore — the next poll resyncs
+    }
+  }
+
+  async function requeue(id: string) {
+    if (!name) return;
+    try {
+      await api.workfmRequeue(slug, id);
+      onRequeued();
+    } catch {
+      // ignore — the requeue button already disables itself when unavailable
+    }
+  }
+
+  return (
+    <aside className="workfm-listeners-panel">
+      <h2 className="workfm-listeners-heading">🏆 Song leaderboard</h2>
+      <ul className="workfm-library-list">
+        {leaderboard.map((t, i) => (
+          <li key={t.libraryId} className="workfm-library-row">
+            <div className="workfm-queue-row-info">
+              <span className="workfm-queue-title">
+                {i + 1}. {t.title}
+              </span>
+              <span className="workfm-queue-artist">{t.artist}</span>
+            </div>
+            <div className="workfm-library-row-actions">
+              <button
+                className={`btn-secondary${t.likedByMe ? " workfm-vote-active" : ""}`}
+                onClick={() => like(t.libraryId)}
+                disabled={!name}
+              >
+                ♥ {t.likes}
+              </button>
+              {t.available && (
+                <button className="btn-secondary" onClick={() => requeue(t.libraryId)} disabled={!name}>
+                  Requeue
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+        {leaderboard.length === 0 && <li className="muted">No liked songs in this room yet.</li>}
+      </ul>
+      <h2 className="workfm-listeners-heading workfm-topdj-heading">🎧 Top DJ this session</h2>
+      {topDj ? (
+        <p className="workfm-topdj-row">
+          <strong>{topDj.name}</strong> · {topDj.likes} like{topDj.likes === 1 ? "" : "s"}
+        </p>
+      ) : (
+        <p className="muted">Nobody's earned that title yet.</p>
+      )}
+    </aside>
+  );
+}
+
+/** Global (cross-room) "Most liked" list — shown on the all-rooms overview
+ * page, unlike SongLeaderboardPanel above which is scoped to one room. */
+function MostLikedPanel() {
+  const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
+
+  const load = useCallback(async () => {
+    try {
+      setTracks(await api.workfmLibrary("most-liked"));
+    } catch {
+      // ignore transient errors — next poll will retry
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const top = tracks.slice(0, 5);
+
+  return (
+    <aside className="workfm-listeners-panel workfm-most-liked-panel">
+      <h2 className="workfm-listeners-heading">Most liked</h2>
+      <ul className="workfm-library-list">
+        {top.map((t, i) => (
+          <li key={t.id} className="workfm-library-row">
+            <div className="workfm-queue-row-info">
+              <span className="workfm-queue-title">
+                {i + 1}. {t.title}
+              </span>
+              <span className="workfm-queue-artist">{t.artist}</span>
+            </div>
+            <div className="workfm-library-row-actions">
+              <span className="muted">♥ {t.likes}</span>
+            </div>
+          </li>
+        ))}
+        {top.length === 0 && <li className="muted">No liked songs yet — be the first!</li>}
+      </ul>
+    </aside>
+  );
+}
+
 const LIBRARY_TABS: { view: WorkFmLibraryView; label: string }[] = [
   { view: "history", label: "History" },
-  { view: "most-liked", label: "Most liked" },
   { view: "saved", label: "Saved uploads" },
 ];
 
@@ -660,6 +780,8 @@ function RoomPage({ slug }: { slug: string }) {
     listeners: [],
     anonymousListeners: 0,
     members: [],
+    leaderboard: [],
+    topDj: null,
     skipVote: { votes: 0, total: 1, hasVoted: false },
     chat: [],
   });
@@ -717,6 +839,16 @@ function RoomPage({ slug }: { slug: string }) {
   async function skip() {
     try {
       await api.workfmSkipCurrent(slug);
+      poll();
+    } catch {
+      // ignore — poll() will resync
+    }
+  }
+
+  async function likeNowPlaying() {
+    if (!state.nowPlaying) return;
+    try {
+      await api.workfmToggleLike(state.nowPlaying.libraryId);
       poll();
     } catch {
       // ignore — poll() will resync
@@ -801,16 +933,25 @@ function RoomPage({ slug }: { slug: string }) {
                   </div>
                 </div>
                 {name && (
-                  <button
-                    className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
-                    onClick={skip}
-                  >
-                    {isMineNowPlaying
-                      ? "Skip"
-                      : state.skipVote.hasVoted
-                        ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                        : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
-                  </button>
+                  <div className="workfm-now-playing-actions">
+                    <button
+                      className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
+                      onClick={likeNowPlaying}
+                      title="Like this song"
+                    >
+                      ♥ {state.nowPlaying.likes}
+                    </button>
+                    <button
+                      className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
+                      onClick={skip}
+                    >
+                      {isMineNowPlaying
+                        ? "Skip"
+                        : state.skipVote.hasVoted
+                          ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                          : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
@@ -858,6 +999,13 @@ function RoomPage({ slug }: { slug: string }) {
         </div>
 
         <div className="workfm-sidebar">
+          <SongLeaderboardPanel
+            leaderboard={state.leaderboard}
+            topDj={state.topDj}
+            slug={slug}
+            name={name}
+            onRequeued={poll}
+          />
           <MembersPanel members={state.members} anonymousListeners={state.anonymousListeners} />
           <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
         </div>
@@ -909,29 +1057,37 @@ function RoomsList() {
         </div>
       </div>
 
-      <ul className="workfm-rooms-list">
-        {rooms.map((room) => (
-          <li key={room.slug} className="workfm-room-row">
-            <Link to={`/workfm/${room.slug}`} className="workfm-room-link">
-              <div className="workfm-queue-row-info">
-                <span className="workfm-queue-title">{room.name}</span>
-                <span className="workfm-queue-artist">
-                  {room.nowPlaying ? `${room.nowPlaying.title} — ${room.nowPlaying.artist}` : "Nothing playing"}
-                </span>
-              </div>
-              <div className="muted">
-                {room.members} in the room · {room.queueLength} queued
-              </div>
-            </Link>
-            {adminUsername && (
-              <button className="btn-secondary workfm-remove-btn" onClick={() => deleteRoom(room.slug, room.name)}>
-                Delete
-              </button>
-            )}
-          </li>
-        ))}
-        {rooms.length === 0 && <li className="muted">No rooms open yet — create the first one!</li>}
-      </ul>
+      <div className="workfm-layout">
+        <div className="workfm-main">
+          <ul className="workfm-rooms-list">
+            {rooms.map((room) => (
+              <li key={room.slug} className="workfm-room-row">
+                <Link to={`/workfm/${room.slug}`} className="workfm-room-link">
+                  <div className="workfm-queue-row-info">
+                    <span className="workfm-queue-title">{room.name}</span>
+                    <span className="workfm-queue-artist">
+                      {room.nowPlaying ? `${room.nowPlaying.title} — ${room.nowPlaying.artist}` : "Nothing playing"}
+                    </span>
+                  </div>
+                  <div className="muted">
+                    {room.members} in the room · {room.queueLength} queued
+                  </div>
+                </Link>
+                {adminUsername && (
+                  <button className="btn-secondary workfm-remove-btn" onClick={() => deleteRoom(room.slug, room.name)}>
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+            {rooms.length === 0 && <li className="muted">No rooms open yet — create the first one!</li>}
+          </ul>
+        </div>
+
+        <div className="workfm-sidebar">
+          <MostLikedPanel />
+        </div>
+      </div>
 
       {showCreateModal && <CreateRoomModal onClose={() => setShowCreateModal(false)} />}
     </div>

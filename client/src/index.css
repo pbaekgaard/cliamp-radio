@@ -895,6 +895,15 @@ input {
   font-size: 15px;
 }
 
+.workfm-topdj-heading {
+  margin-top: 20px;
+}
+
+.workfm-topdj-row {
+  margin: 0;
+  font-size: 14px;
+}
+
 .workfm-listeners-list {
   display: flex;
   flex-direction: column;
@@ -966,6 +975,13 @@ input {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.workfm-now-playing-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .workfm-now-playing-title {

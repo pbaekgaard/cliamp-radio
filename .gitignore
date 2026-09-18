@@ -9,3 +9,6 @@ server/data/listen-history.jsonl
 server/data/youtube-cookies.txt
 server/data/yt-browser-profile/
 server/data/deif-uploads/
+server/data/workfm-uploads/
+server/data/workfm-library.json
+server/data/workfm-saved-uploads/
