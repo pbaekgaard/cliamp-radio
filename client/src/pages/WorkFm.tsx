@@ -870,7 +870,6 @@ function RoomPage({ slug }: { slug: string }) {
     );
   }
 
-  const isMineNowPlaying = state.nowPlaying && name && state.nowPlaying.addedBy.toLowerCase() === name.toLowerCase();
   const majorityNeeded = Math.ceil(state.skipVote.total / 2);
 
   return (
@@ -943,23 +942,17 @@ function RoomPage({ slug }: { slug: string }) {
                       className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
                       onClick={skip}
                     >
-                      {isMineNowPlaying
-                        ? "Skip"
-                        : state.skipVote.hasVoted
-                          ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                          : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
+                      {state.skipVote.hasVoted
+                        ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                        : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`}
                     </button>
                     <button
                       className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
                       onClick={repeat}
                     >
-                      {isMineNowPlaying
-                        ? state.repeatVote.armed
-                          ? "🔁 Repeat: on"
-                          : "🔁 Repeat"
-                        : state.repeatVote.hasVoted
-                          ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                          : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`}
+                      {state.repeatVote.hasVoted
+                        ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                        : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`}
                     </button>
                   </div>
                 )}
@@ -967,7 +960,7 @@ function RoomPage({ slug }: { slug: string }) {
             ) : (
               <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
             )}
-            {name && state.nowPlaying && !isMineNowPlaying && (
+            {name && state.nowPlaying && (
               <p className="muted workfm-vote-hint">
                 Needs {majorityNeeded} of {state.skipVote.total} listening now to skip (a 50/50 split skips too).
               </p>

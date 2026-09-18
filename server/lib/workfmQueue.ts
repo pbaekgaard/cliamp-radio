@@ -497,11 +497,9 @@ class WorkFmQueueStream {
   }
 
   /**
-   * Skips the currently playing track. The person who added it can skip it
-   * instantly (they get to change their mind); anyone else instead casts a
-   * vote, and the track is skipped as soon as votes reach a majority of
-   * currently-present listeners — or an exact 50/50 split, since a tie
-   * means at least half the room wants it gone.
+   * Votes to skip the currently playing track — skipped as soon as votes
+   * reach a majority of currently-present listeners, or an exact 50/50
+   * split, since a tie means at least half the room wants it gone.
    */
   requestSkip(requestedBy: string): {
     ok: boolean;
@@ -513,11 +511,6 @@ class WorkFmQueueStream {
   } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
     const name = requestedBy.toLowerCase();
-
-    if (this.current.addedBy.toLowerCase() === name) {
-      this.killPlayback();
-      return { ok: true, skipped: true };
-    }
 
     // Toggle: voting again removes your vote, in case you change your mind.
     if (this.skipVotes.has(name)) this.skipVotes.delete(name);
@@ -539,11 +532,9 @@ class WorkFmQueueStream {
    * a flag that loop() checks once the track finishes naturally: if armed,
    * the same item is reinserted at the front of the queue instead of moving
    * on, so it plays again right away rather than being requeued behind
-   * whatever else gets added. The person who added the track can arm/disarm
-   * it instantly (same "instant" privilege as skip); anyone else votes, and
-   * it arms once votes reach a majority of currently-present listeners (or
-   * an exact 50/50 split). Armed/voted state resets whenever the track
-   * changes (see loop()).
+   * whatever else gets added. It arms once votes reach a majority of
+   * currently-present listeners (or an exact 50/50 split). Armed/voted
+   * state resets whenever the track changes (see loop()).
    */
   requestRepeat(requestedBy: string): {
     ok: boolean;
@@ -555,11 +546,6 @@ class WorkFmQueueStream {
   } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
     const name = requestedBy.toLowerCase();
-
-    if (this.current.addedBy.toLowerCase() === name) {
-      this.repeatArmed = !this.repeatArmed;
-      return { ok: true, armed: this.repeatArmed };
-    }
 
     // Toggle: voting again removes your vote, in case you change your mind.
     if (this.repeatVotes.has(name)) this.repeatVotes.delete(name);
