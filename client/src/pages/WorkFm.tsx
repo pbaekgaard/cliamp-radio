@@ -814,158 +814,160 @@ function RoomPage({ slug }: { slug: string }) {
 
   return (
     <div className="workfm-page">
-      <div className="workfm-header">
-        <div>
-          <h1>{state.roomName || "Radio Bækgaard"}</h1>
-          {name ? (
-            <p className="muted">
-              Signed in as <strong>{name}</strong>
-            </p>
-          ) : (
-            <p className="muted">Join to request tracks, upload MP3s, chat, like, or vote to skip.</p>
-          )}
-        </div>
-        <div className="header-actions">
-          <span className="workfm-volume-control">
-            <span aria-hidden="true">{volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}</span>
-            <input
-              type="range"
-              className="mini-player-volume-slider"
-              min={0}
-              max={100}
-              value={Math.round(volume * 100)}
-              onChange={(e) => setVolume(Number(e.target.value) / 100)}
-              aria-label="Volume (only affects your playback)"
-              title="Volume (only affects your playback)"
-            />
-          </span>
-          {name ? (
-            <button className="btn-danger" onClick={handleLeave}>
-              Leave room
-            </button>
-          ) : (
-            <button className="btn-primary" onClick={() => setShowJoinModal(true)}>
-              Join
-            </button>
-          )}
-        </div>
-      </div>
-
-      {showJoinModal && (
-        <JoinRoomModal
-          onClose={() => setShowJoinModal(false)}
-          onJoin={(yourName) => identify(yourName, slug)}
-        />
-      )}
-      {showUploadModal && (
-        <UploadTrackModal slug={slug} onClose={() => setShowUploadModal(false)} onUploaded={poll} />
-      )}
-
-      <div className="workfm-layout">
-        <div className="workfm-main">
-          <div className="workfm-top-row">
-            <MostPlayedPanel mostPlayed={state.mostPlayed} slug={slug} name={name} onRequeued={poll} />
-            <div className="workfm-now-playing">
-              <p className="workfm-now-playing-label">Now playing</p>
-              {state.nowPlaying ? (
-                <div className="workfm-now-playing-card">
-                  <div>
-                    <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
-                    <div className="muted">{state.nowPlaying.artist}</div>
-                    <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
-                    <div className="muted">
-                      requested by <strong>{state.nowPlaying.addedBy}</strong>
-                    </div>
-                  </div>
-                  {name && (
-                    <div className="workfm-now-playing-actions">
-                      <button
-                        className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
-                        onClick={likeNowPlaying}
-                        title="Like this song"
-                      >
-                        ♥ {state.nowPlaying.likes}
-                      </button>
-                      <button
-                        className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
-                        onClick={skip}
-                        title={
-                          state.skipVote.hasVoted
-                            ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                            : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                        }
-                      >
-                        <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
-                      </button>
-                      <button
-                        className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
-                        onClick={repeat}
-                        title={
-                          state.repeatVote.hasVoted
-                            ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                            : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                        }
-                      >
-                        <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
-                      </button>
-                    </div>
-                  )}
-                </div>
+      <div className="workfm-page-body">
+        <MostPlayedPanel mostPlayed={state.mostPlayed} slug={slug} name={name} onRequeued={poll} />
+        <div className="workfm-page-main">
+          <div className="workfm-header">
+            <div>
+              <h1>{state.roomName || "Radio Bækgaard"}</h1>
+              {name ? (
+                <p className="muted">
+                  Signed in as <strong>{name}</strong>
+                </p>
               ) : (
-                <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
+                <p className="muted">Join to request tracks, upload MP3s, chat, like, or vote to skip.</p>
               )}
-              {name && state.nowPlaying && state.repeatVote.armed && (
-                <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
+            </div>
+            <div className="header-actions">
+              <span className="workfm-volume-control">
+                <span aria-hidden="true">{volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}</span>
+                <input
+                  type="range"
+                  className="mini-player-volume-slider"
+                  min={0}
+                  max={100}
+                  value={Math.round(volume * 100)}
+                  onChange={(e) => setVolume(Number(e.target.value) / 100)}
+                  aria-label="Volume (only affects your playback)"
+                  title="Volume (only affects your playback)"
+                />
+              </span>
+              {name ? (
+                <button className="btn-danger" onClick={handleLeave}>
+                  Leave room
+                </button>
+              ) : (
+                <button className="btn-primary" onClick={() => setShowJoinModal(true)}>
+                  Join
+                </button>
               )}
             </div>
           </div>
 
-          {name && (
-            <>
-              <form className="workfm-add-form" onSubmit={addToQueue}>
-                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
-                <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
-                  {submitting ? "Adding…" : "Add to queue"}
-                </button>
-              </form>
-              {error && <div className="error">{error}</div>}
-
-              <div className="workfm-upload-row">
-                <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
-                  Upload an MP3
-                </button>
-              </div>
-            </>
+          {showJoinModal && (
+            <JoinRoomModal
+              onClose={() => setShowJoinModal(false)}
+              onJoin={(yourName) => identify(yourName, slug)}
+            />
+          )}
+          {showUploadModal && (
+            <UploadTrackModal slug={slug} onClose={() => setShowUploadModal(false)} onUploaded={poll} />
           )}
 
-          <h2 className="workfm-queue-heading">Up next ({state.queue.length})</h2>
-          <ul className="workfm-queue-list">
-            {state.queue.map((item, i) => (
-              <QueueRow
-                key={item.id}
-                item={item}
-                isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
-                isFirst={i === 0}
+          <div className="workfm-layout">
+            <div className="workfm-main">
+              <div className="workfm-now-playing">
+                <p className="workfm-now-playing-label">Now playing</p>
+                {state.nowPlaying ? (
+                  <div className="workfm-now-playing-card">
+                    <div>
+                      <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
+                      <div className="muted">{state.nowPlaying.artist}</div>
+                      <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
+                      <div className="muted">
+                        requested by <strong>{state.nowPlaying.addedBy}</strong>
+                      </div>
+                    </div>
+                    {name && (
+                      <div className="workfm-now-playing-actions">
+                        <button
+                          className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
+                          onClick={likeNowPlaying}
+                          title="Like this song"
+                        >
+                          ♥ {state.nowPlaying.likes}
+                        </button>
+                        <button
+                          className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
+                          onClick={skip}
+                          title={
+                            state.skipVote.hasVoted
+                              ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                              : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                          }
+                        >
+                          <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
+                        </button>
+                        <button
+                          className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
+                          onClick={repeat}
+                          title={
+                            state.repeatVote.hasVoted
+                              ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                              : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                          }
+                        >
+                          <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
+                )}
+                {name && state.nowPlaying && state.repeatVote.armed && (
+                  <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
+                )}
+              </div>
+
+              {name && (
+                <>
+                  <form className="workfm-add-form" onSubmit={addToQueue}>
+                    <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
+                    <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
+                      {submitting ? "Adding…" : "Add to queue"}
+                    </button>
+                  </form>
+                  {error && <div className="error">{error}</div>}
+
+                  <div className="workfm-upload-row">
+                    <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
+                      Upload an MP3
+                    </button>
+                  </div>
+                </>
+              )}
+
+              <h2 className="workfm-queue-heading">Up next ({state.queue.length})</h2>
+              <ul className="workfm-queue-list">
+                {state.queue.map((item, i) => (
+                  <QueueRow
+                    key={item.id}
+                    item={item}
+                    isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
+                    isFirst={i === 0}
+                    name={name}
+                    onRemove={remove}
+                    onVoteNext={voteNext}
+                  />
+                ))}
+                {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}
+              </ul>
+
+              <LibraryPanel slug={slug} name={name} onRequeued={poll} />
+            </div>
+
+            <div className="workfm-sidebar">
+              <SongLeaderboardPanel
+                leaderboard={state.leaderboard}
+                slug={slug}
                 name={name}
-                onRemove={remove}
-                onVoteNext={voteNext}
+                onRequeued={poll}
               />
-            ))}
-            {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}
-          </ul>
-
-          <LibraryPanel slug={slug} name={name} onRequeued={poll} />
-        </div>
-
-        <div className="workfm-sidebar">
-          <SongLeaderboardPanel
-            leaderboard={state.leaderboard}
-            slug={slug}
-            name={name}
-            onRequeued={poll}
-          />
-          <MembersPanel members={state.members} anonymousListeners={state.anonymousListeners} />
-          <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
+              <MembersPanel members={state.members} anonymousListeners={state.anonymousListeners} />
+              <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
+            </div>
+          </div>
         </div>
       </div>
     </div>

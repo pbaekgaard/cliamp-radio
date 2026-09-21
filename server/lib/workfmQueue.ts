@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { relayPaced } from "./audioRelay";
@@ -27,6 +28,10 @@ const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
 const MAX_CHAT_MESSAGE_LENGTH = 500;
+// Where the queue + chat are persisted to disk so an in-progress room
+// survives a server restart (e.g. from an update — see scripts/update.sh)
+// instead of coming back empty. See restore()/schedulePersist()/flush() below.
+const QUEUE_STATE_PATH = path.join(import.meta.dir, "..", "data", "workfm-queue-state.json");
 // How long a named visitor is considered "in the room" after their last
 // GET /queue poll (see touchPresence()/list() below) before they're
 // considered gone — comfortably longer than the client's ~1.5s poll

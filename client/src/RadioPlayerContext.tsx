@@ -53,6 +53,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [volume, setVolumeState] = useState(loadStoredVolume);
+  const autoplayRetryArmedRef = useRef(false);
 
   useEffect(() => {
     nowPlayingRef.current = nowPlaying;
@@ -70,13 +71,35 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     reconnectAttemptsRef.current = 0;
   }
 
+  // Browsers block audio.play() without a preceding user gesture (a click,
+  // keypress, tap, etc. on the page) — silently rejecting the promise. Since
+  // WorkFm auto-plays on mount with no dedicated "Listen live" button to
+  // provide that gesture, a blocked attempt is retried the instant the
+  // visitor interacts with the page at all (any click/keydown/touch), which
+  // satisfies the browser's requirement without needing a dedicated button.
+  function armAutoplayRetry() {
+    if (autoplayRetryArmedRef.current) return;
+    autoplayRetryArmedRef.current = true;
+    const retry = () => {
+      autoplayRetryArmedRef.current = false;
+      document.removeEventListener("pointerdown", retry);
+      document.removeEventListener("keydown", retry);
+      const audio = audioRef.current;
+      if (audio && nowPlayingRef.current) {
+        audio.play().catch(() => {});
+      }
+    };
+    document.addEventListener("pointerdown", retry, { once: true });
+    document.addEventListener("keydown", retry, { once: true });
+  }
+
   function play(url: string, label: string) {
     const audio = audioRef.current;
     if (!audio) return;
     clearReconnect();
     audio.src = url;
     audio.volume = volume;
-    audio.play().catch(() => {});
+    audio.play().catch(() => armAutoplayRetry());
     setNowPlaying({ url, label });
   }
 
@@ -121,7 +144,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       // Re-set src (not just .play()) so a stalled/broken fetch actually
       // reconnects from scratch rather than retrying the same dead one.
       audioRef.current.src = stillWanted.url;
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(() => armAutoplayRetry());
     }, delay);
   }
 
