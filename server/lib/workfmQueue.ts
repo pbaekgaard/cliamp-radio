@@ -25,10 +25,14 @@ import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, 
 // silence (see playSilence() below) rather than going dead — the HTTP
 // connection stays open and bytes keep flowing, so a listener already tuned
 // in hears the next track the instant it's added, with no need to
-// reconnect — there's no "idle timeout" teardown of *playback* here, since
-// this is meant to always be ready to pick back up the instant someone
-// queues something. (Whole *rooms* — see workfmRooms.ts, which each own one
-// WorkFmQueueStream instance — do get torn down after being empty a while.)
+// reconnect. That said, if the room's been completely empty (no stream
+// subscribers, nobody with the page open — see emptySince) for
+// AUTO_DJ_IDLE_TIMEOUT_MS, the auto-DJ stops picking new tracks and the
+// loop goes to sleep (see sleepUntilNotIdle() below) rather than burning
+// CPU forever transcoding to nobody; it wakes back up the instant a real
+// request lands or someone shows up again. (Whole *rooms* — see
+// workfmRooms.ts, which each own one WorkFmQueueStream instance — do get
+// torn down after being empty a while.)
 // ---------------------------------------------------------------------------
 
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
@@ -49,6 +53,15 @@ const QUEUE_STATE_PATH = path.join(import.meta.dir, "..", "data", "workfm-queue-
 // considered gone — comfortably longer than the client's ~1.5s poll
 // interval so a slow network blip doesn't make someone flicker in and out.
 const PRESENCE_TIMEOUT_MS = 10 * 1000;
+// How long the room can go with nobody around at all (see emptySince
+// getter) before the auto-DJ stops picking new tracks and the loop goes to
+// sleep — no yt-dlp/ffmpeg processes running — to save CPU on the host.
+// Real requests and actual listeners still wake it right back up (see
+// sleepUntilNotIdle() below), so this only ever pauses the "always
+// something on air" behavior, it doesn't tear anything down permanently.
+const AUTO_DJ_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+// How often the idle sleep loop checks whether someone's shown up again.
+const IDLE_POLL_INTERVAL_MS = 3 * 1000;
 // A "listener" is someone whose browser currently has an open connection to
 // the actual audio stream (i.e. they clicked "Listen live" and are still
 // playing it, or are tuned in via cliamp) — see subscribe() below. Merely
@@ -839,9 +852,33 @@ class WorkFmQueueStream {
     };
   }
 
+  /**
+   * Pauses the auto-DJ once the room's been empty (see emptySince) for
+   * AUTO_DJ_IDLE_TIMEOUT_MS — no track picked, no ffmpeg/yt-dlp spawned,
+   * nothing broadcast — and blocks until either a real request lands in
+   * the queue or someone shows up again (a stream subscriber connects, or
+   * a page poll touches presence), at which point the loop resumes as
+   * normal. This only runs when the room was already idle long enough, so
+   * it never delays picking up a request from someone who's actually here.
+   */
+  private async sleepUntilNotIdle(gen: number): Promise<void> {
+    this.current = null;
+    this.currentStartedAt = null;
+    this.currentMetaString = "Radio Bækgaard - auto-DJ resting (no listeners)";
+    while (this.currentGen === gen && this.queue.length === 0 && this.emptySince !== null) {
+      await Bun.sleep(IDLE_POLL_INTERVAL_MS);
+    }
+  }
+
   private async loop() {
     while (true) {
       if (this.queue.length === 0) {
+        const emptySince = this.emptySince;
+        if (emptySince !== null && Date.now() - emptySince >= AUTO_DJ_IDLE_TIMEOUT_MS) {
+          const gen = this.currentGen;
+          await this.sleepUntilNotIdle(gen);
+          continue;
+        }
         // Request queue's empty — let the auto-DJ fill in with a shuffled
         // pick from history instead of going straight to silence. This
         // item is pushed and immediately shifted below with no `await` in

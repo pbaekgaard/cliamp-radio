@@ -745,6 +745,7 @@ input {
 
 .workfm-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
@@ -940,12 +941,51 @@ input {
 }
 
 @media (max-width: 720px) {
+  .workfm-page {
+    padding: 20px 14px 40px;
+  }
   .workfm-layout {
     flex-direction: column;
   }
   .workfm-listeners-panel {
     width: 100%;
     position: static;
+  }
+  .workfm-header .header-actions {
+    width: 100%;
+  }
+  .workfm-header .header-actions .btn-primary,
+  .workfm-header .header-actions .btn-secondary,
+  .workfm-header .header-actions .btn-danger {
+    flex: 1;
+  }
+  .workfm-modal {
+    padding: 24px 20px;
+  }
+  .workfm-now-playing-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .workfm-now-playing-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .workfm-now-playing-actions .btn-secondary {
+    flex: 1;
+    min-width: 100px;
+  }
+  .workfm-add-form {
+    flex-direction: column;
+  }
+  .workfm-queue-row {
+    flex-wrap: wrap;
+  }
+  .workfm-queue-row-meta {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .workfm-chat-panel {
+    min-height: 360px;
   }
 }
 
