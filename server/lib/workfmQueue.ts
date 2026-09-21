@@ -324,15 +324,18 @@ class WorkFmQueueStream {
   }
 
   /** Attaches this queued item's "vote next" tally — same majority-of-
-   * listeners toggle mechanic as skipVote/repeatVote (see requestMoveToFront
-   * below), but tracked per queue item id instead of "the current track"
-   * since any not-yet-played entry can be voted on independently. */
+   * present-members mechanic as requestMoveToFront below, but tracked per
+   * queue item id instead of "the current track" since any not-yet-played
+   * entry can be voted on independently. Majority is of everyone currently
+   * present in the room (activeMemberNames), not just people actively
+   * streaming the audio (listenerNames) — voting doesn't require tuning in,
+   * so a vote total shouldn't shrink to just those who are. */
   private withNextVote(item: QueueItem, viewerName?: string): { votes: number; total: number; hasVoted: boolean } {
     const voters = this.nextVotes.get(item.id);
     const name = viewerName?.toLowerCase();
     return {
       votes: voters?.size ?? 0,
-      total: Math.max(this.listenerNames().length, 1),
+      total: Math.max(this.activeMemberNames().length, 1),
       hasVoted: !!name && !!voters?.has(name),
     };
   }
@@ -403,7 +406,8 @@ class WorkFmQueueStream {
     this.touchPresence(viewerName);
     const listeners = this.listenerNames();
     const listening = new Set(listeners);
-    const members = this.activeMemberNames().map((name) => ({ name, listening: listening.has(name) }));
+    const activeMembers = this.activeMemberNames();
+    const members = activeMembers.map((name) => ({ name, listening: listening.has(name) }));
     return {
       nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
       // Same defensive filter as status's queueLength above — auto-DJ picks
@@ -419,13 +423,15 @@ class WorkFmQueueStream {
       mostPlayed: this.roomMostPlayed(viewerName),
       skipVote: {
         votes: this.skipVotes.size,
-        total: Math.max(listeners.length, 1),
+        // Majority of everyone present (activeMembers), matching
+        // requestSkip's own threshold — not just people streaming audio.
+        total: Math.max(activeMembers.length, 1),
         hasVoted: !!viewerName && this.skipVotes.has(viewerName.toLowerCase()),
       },
       repeatVote: {
         armed: this.repeatArmed,
         votes: this.repeatVotes.size,
-        total: Math.max(listeners.length, 1),
+        total: Math.max(activeMembers.length, 1),
         hasVoted: !!viewerName && this.repeatVotes.has(viewerName.toLowerCase()),
       },
       chat: this.chat,
@@ -641,7 +647,7 @@ class WorkFmQueueStream {
 
   /**
    * Votes to bump a queued (not-yet-playing) track to the front of the
-   * queue — same majority-of-present-listeners toggle mechanic as
+   * queue — same majority-of-present-members toggle mechanic as
    * requestSkip/requestRepeat, but tracked per queue item id so any entry
    * can be voted on independently of the others. Reaching a majority moves
    * it to the front immediately and clears its votes (a fresh vote is
@@ -672,7 +678,12 @@ class WorkFmQueueStream {
     if (voters.has(name)) voters.delete(name);
     else voters.add(name);
 
-    const total = Math.max(this.listenerNames().length, 1);
+    // Majority of everyone currently present in the room (activeMemberNames),
+    // not just people actively streaming the audio (listenerNames) — voting
+    // doesn't require tuning in, so a lone listener shouldn't be able to hit
+    // "100%" of an artificially tiny total while other members present go
+    // uncounted.
+    const total = Math.max(this.activeMemberNames().length, 1);
     const votes = voters.size;
     if (votes * 2 >= total) {
       this.nextVotes.delete(itemId);
@@ -685,7 +696,7 @@ class WorkFmQueueStream {
 
   /**
    * Votes to skip the currently playing track — skipped as soon as votes
-   * reach a majority of currently-present listeners, or an exact 50/50
+   * reach a majority of currently-present members, or an exact 50/50
    * split, since a tie means at least half the room wants it gone.
    */
   requestSkip(requestedBy: string): {
@@ -703,7 +714,9 @@ class WorkFmQueueStream {
     if (this.skipVotes.has(name)) this.skipVotes.delete(name);
     else this.skipVotes.add(name);
 
-    const total = Math.max(this.listenerNames().length, 1);
+    // See requestMoveToFront's comment above for why this is
+    // activeMemberNames() rather than listenerNames().
+    const total = Math.max(this.activeMemberNames().length, 1);
     const votes = this.skipVotes.size;
     if (votes * 2 >= total) {
       this.skipVotes.clear();
@@ -720,7 +733,7 @@ class WorkFmQueueStream {
    * the same item is reinserted at the front of the queue instead of moving
    * on, so it plays again right away rather than being requeued behind
    * whatever else gets added. It arms once votes reach a majority of
-   * currently-present listeners (or an exact 50/50 split). Armed/voted
+   * currently-present members (or an exact 50/50 split). Armed/voted
    * state resets whenever the track changes (see loop()).
    */
   requestRepeat(requestedBy: string): {
@@ -738,7 +751,9 @@ class WorkFmQueueStream {
     if (this.repeatVotes.has(name)) this.repeatVotes.delete(name);
     else this.repeatVotes.add(name);
 
-    const total = Math.max(this.listenerNames().length, 1);
+    // See requestMoveToFront's comment above for why this is
+    // activeMemberNames() rather than listenerNames().
+    const total = Math.max(this.activeMemberNames().length, 1);
     const votes = this.repeatVotes.size;
     this.repeatArmed = votes * 2 >= total;
     return { ok: true, armed: this.repeatArmed, votes, total, hasVoted: this.repeatVotes.has(name) };
