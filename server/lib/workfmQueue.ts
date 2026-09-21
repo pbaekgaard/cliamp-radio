@@ -2,23 +2,32 @@ import { readFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { relayPaced } from "./audioRelay";
-import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
-// WorkFM: an always-on "radio" queue engine whose playlist is a live,
-// public request queue instead of a fixed list of tracks. Anyone can add a
-// YouTube video (after picking a display name — see workfmIdentity.ts); videos
-// play back-to-back in the order they were added (FIFO, no shuffling) and
-// are broadcast to every listener at the same playback position, the same
-// way playlistStream.ts does for the fixed-playlist stations. When the
-// queue runs dry, the stream keeps broadcasting encoded silence (see
-// playSilence() below) rather than going dead — the HTTP connection stays
-// open and bytes keep flowing, so a listener already tuned in hears the
-// next track the instant it's added, with no need to reconnect — there's
-// no "idle timeout" teardown of *playback* here, since this is meant to
-// always be ready to pick back up the instant someone queues something.
-// (Whole *rooms* — see workfmRooms.ts, which each own one
+// WorkFM: an always-on radio queue engine with two queues layered on top of
+// each other. The visible one is a live, public *request* queue — anyone can
+// add a YouTube video or upload an mp3 (after picking a display name — see
+// workfmIdentity.ts); requests play back-to-back in the order they were
+// added (FIFO, no shuffling). Underneath it, an invisible "auto-DJ" queue
+// keeps the station going whenever the request queue is empty: it shuffles
+// through every track that's ever actually been played (see
+// listPlayableHistoryIds() in workfmLibrary.ts) and plays them on repeat,
+// forever, so there's always *something* on air — like a real radio station
+// between requests. Auto-DJ picks are never inserted into (or visible via)
+// the public queue; they're pulled fresh right as the request queue runs dry
+// (see loop() below) and only ever exist as `this.current` while playing.
+// Every track, whichever queue it came from, is broadcast to every listener
+// at the same playback position, the same way playlistStream.ts does for the
+// fixed-playlist stations. If there's truly nothing playable yet (empty
+// history and empty request queue), the stream keeps broadcasting encoded
+// silence (see playSilence() below) rather than going dead — the HTTP
+// connection stays open and bytes keep flowing, so a listener already tuned
+// in hears the next track the instant it's added, with no need to
+// reconnect — there's no "idle timeout" teardown of *playback* here, since
+// this is meant to always be ready to pick back up the instant someone
+// queues something. (Whole *rooms* — see workfmRooms.ts, which each own one
 // WorkFmQueueStream instance — do get torn down after being empty a while.)
 // ---------------------------------------------------------------------------
 
@@ -75,6 +84,11 @@ export interface QueueItem {
    * at add time (see addToQueue/addUploadToQueue) or, failing that,
    * best-effort probed right before it starts playing (see loop()). */
   durationSec?: number;
+  /** Set when this item was picked by the auto-DJ (see pickAutoDjEntry()/
+   * buildAutoDjItem() below) rather than actually requested by a listener —
+   * such items never sit in the visible request queue, only ever exist as
+   * `this.current` while playing. Left undefined for real requests. */
+  isAutoDj?: boolean;
 }
 
 interface ChatMessage {
@@ -198,6 +212,13 @@ class WorkFmQueueStream {
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
   private chat: ChatMessage[] = [];
   private nextChatId = 1;
+  // Shuffled order (library ids) the auto-DJ works through whenever the
+  // request queue is empty — reshuffled from scratch (see
+  // listPlayableHistoryIds()) once exhausted. See pickAutoDjEntry() below.
+  private autoDjShuffle: string[] = [];
+  // libraryId of the last track the auto-DJ played, so a fresh reshuffle can
+  // avoid immediately repeating it back-to-back.
+  private lastAutoDjLibraryId: string | null = null;
   // name -> last time (ms since epoch) they polled GET /queue for this room.
   // This is how "who's in the room" is tracked — separate from who's
   // actually streaming audio (subscribers) — see touchPresence()/members().
@@ -223,7 +244,11 @@ class WorkFmQueueStream {
             startedAt: this.currentStartedAt,
           }
         : null,
-      queueLength: this.queue.length,
+      // Defensive filter — auto-DJ picks are shifted out of `this.queue`
+      // synchronously the instant they're pushed (see loop()), so this
+      // should never actually find one, but the request queue's length
+      // should never count them even if that ever changes.
+      queueLength: this.queue.filter((i) => !i.isAutoDj).length,
     };
   }
 
@@ -381,7 +406,12 @@ class WorkFmQueueStream {
     const members = this.activeMemberNames().map((name) => ({ name, listening: listening.has(name) }));
     return {
       nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
-      queue: this.queue.map((item) => ({ ...this.withLikes(item, viewerName), nextVote: this.withNextVote(item, viewerName) })),
+      // Same defensive filter as status's queueLength above — auto-DJ picks
+      // should never actually be visible here, but are excluded on
+      // principle rather than relying purely on the timing guarantee.
+      queue: this.queue
+        .filter((item) => !item.isAutoDj)
+        .map((item) => ({ ...this.withLikes(item, viewerName), nextVote: this.withNextVote(item, viewerName) })),
       listeners,
       anonymousListeners: this.anonymousListenerCount(),
       members,
@@ -729,19 +759,95 @@ class WorkFmQueueStream {
     }
   }
 
+  /**
+   * Picks the next track for the auto-DJ to play — a library entry from
+   * history, shuffled — or null if there's nothing playable yet (fresh
+   * install with no history, or every saved upload has expired since being
+   * shuffled in). Refills+reshuffles `autoDjShuffle` from
+   * listPlayableHistoryIds() once it runs out, swapping the last-played
+   * track out of the first slot (if it landed there) so shuffle repeats
+   * don't play the same thing twice in a row.
+   */
+  private pickAutoDjEntry(): LibraryTrack | null {
+    if (this.autoDjShuffle.length === 0) {
+      const ids = listPlayableHistoryIds();
+      if (ids.length === 0) return null;
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+      }
+      if (ids.length > 1 && ids[0] === this.lastAutoDjLibraryId) {
+        [ids[0], ids[1]] = [ids[1]!, ids[0]!];
+      }
+      this.autoDjShuffle = ids;
+    }
+    // Entries can have gone stale (e.g. a saved upload's TTL expired) since
+    // they were shuffled in — re-fetch and skip any that are no longer
+    // playable rather than surfacing a broken track.
+    while (this.autoDjShuffle.length > 0) {
+      const id = this.autoDjShuffle.shift()!;
+      const entry = getLibraryTrack(id);
+      const playable = entry && (entry.source === "youtube" ? !!entry.videoId && !!entry.url : !!entry.savedFilePath);
+      if (entry && playable) {
+        this.lastAutoDjLibraryId = id;
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  /** Turns an auto-DJ's picked library entry into a playable (but
+   * invisible — see QueueItem.isAutoDj) queue item, mirroring
+   * requeueFromLibrary()'s reconstruction logic. */
+  private buildAutoDjItem(entry: LibraryTrack): QueueItem | null {
+    const base = {
+      id: this.nextId++,
+      addedBy: "Auto DJ",
+      addedAt: Date.now(),
+      libraryId: entry.id,
+      isAutoDj: true as const,
+    };
+    if (entry.source === "youtube") {
+      if (!entry.videoId || !entry.url) return null;
+      return { ...base, videoId: entry.videoId, url: entry.url, artist: entry.artist, title: entry.title, source: "youtube" };
+    }
+    if (!entry.savedFilePath) return null;
+    return {
+      ...base,
+      videoId: "",
+      url: "",
+      artist: entry.artist,
+      title: entry.title,
+      source: "upload",
+      diskPath: entry.savedFilePath,
+      saveForLater: true, // it's the shared saved copy — never delete it after play
+    };
+  }
+
   private async loop() {
     while (true) {
       if (this.queue.length === 0) {
-        this.current = null;
-        this.currentStartedAt = null;
-        this.currentMetaString = "Radio Bækgaard - waiting for requests";
-        const gen = ++this.currentGen;
-        try {
-          await this.playSilence(gen);
-        } catch (err) {
-          console.error("[workfm-queue] silence generator failed:", err);
+        // Request queue's empty — let the auto-DJ fill in with a shuffled
+        // pick from history instead of going straight to silence. This
+        // item is pushed and immediately shifted below with no `await` in
+        // between, so it's never observable in the public queue (see
+        // list()/status).
+        const autoEntry = this.pickAutoDjEntry();
+        const autoItem = autoEntry ? this.buildAutoDjItem(autoEntry) : null;
+        if (autoItem) {
+          this.queue.push(autoItem);
+        } else {
+          this.current = null;
+          this.currentStartedAt = null;
+          this.currentMetaString = "Radio Bækgaard - waiting for requests";
+          const gen = ++this.currentGen;
+          try {
+            await this.playSilence(gen);
+          } catch (err) {
+            console.error("[workfm-queue] silence generator failed:", err);
+          }
+          continue;
         }
-        continue;
       }
       const item = this.queue.shift()!;
       this.current = item;

@@ -353,16 +353,14 @@ function MembersPanel({ members, anonymousListeners }: { members: WorkFmMember[]
         {members.map((m) => (
           <li key={m.name} className="workfm-listener-row">
             <span>{m.name}</span>
-            {m.listening && (
-              <span className="workfm-listening-badge" title="Listening live">
-                🎧 Listening
-              </span>
-            )}
+            <span className="workfm-listening-badge" title="Listening live">
+              🎧 Listening
+            </span>
           </li>
         ))}
         {anonymousListeners > 0 && (
           <li className="workfm-listener-row muted">
-            <span>{anonymousListeners} via cliamp / unnamed</span>
+            <span>{anonymousListeners} via cliamp</span>
             <span className="workfm-listening-badge" title="Listening live">
               🎧 Listening
             </span>

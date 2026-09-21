@@ -189,6 +189,18 @@ export function getLibraryTrack(id: string): LibraryTrack | null {
   return library.get(id) ?? null;
 }
 
+/** Library ids of every track that's actually been played at least once and
+ * is still playable right now (YouTube is always assumed playable; an
+ * upload only counts while its file is still saved on disk) — this is the
+ * pool the auto-DJ shuffles through when the request queue runs dry (see
+ * WorkFmQueueStream's auto-DJ logic in workfmQueue.ts). Order is arbitrary;
+ * the caller is responsible for shuffling. */
+export function listPlayableHistoryIds(): string[] {
+  return [...library.values()]
+    .filter((e) => e.playCount > 0 && (e.source === "youtube" || !!e.savedFilePath))
+    .map((e) => e.id);
+}
+
 export function listHistory(viewerName?: string, limit = 50): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.playCount > 0) // exclude upload placeholders that haven't actually played yet (see registerUpload)
