@@ -297,12 +297,19 @@ function UploadTrackModal({
 function QueueRow({
   item,
   isMine,
+  isFirst,
+  name,
   onRemove,
+  onVoteNext,
 }: {
   item: WorkFmQueueItem;
   isMine: boolean;
+  isFirst: boolean;
+  name: string | null;
   onRemove: (id: number) => void;
+  onVoteNext: (id: number) => void;
 }) {
+  const nextVote = item.nextVote;
   return (
     <li className="workfm-queue-row">
       <div className="workfm-queue-row-info">
@@ -316,6 +323,16 @@ function QueueRow({
         <span className="muted">
           added by <strong>{item.addedBy}</strong> · {timeAgo(item.addedAt)}
         </span>
+        {!isFirst && nextVote && (
+          <button
+            className={`btn-secondary workfm-remove-btn${nextVote.hasVoted ? " workfm-vote-active" : ""}`}
+            onClick={() => onVoteNext(item.id)}
+            disabled={!name}
+            title={nextVote.hasVoted ? "Remove your vote to bump this to the front" : "Vote to bump this to the front of the queue"}
+          >
+            ↑ Next {nextVote.votes}/{nextVote.total}
+          </button>
+        )}
         {isMine && (
           <button className="btn-secondary workfm-remove-btn" onClick={() => onRemove(item.id)}>
             Remove
@@ -501,6 +518,7 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
   const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
   const [open, setOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -513,6 +531,17 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
   useEffect(() => {
     if (open) load();
   }, [open, load]);
+
+  // Reset any in-progress search when switching tabs, so a "saved uploads"
+  // query doesn't silently keep filtering out history results (or vice versa).
+  useEffect(() => {
+    setQuery("");
+  }, [view]);
+
+  const q = query.trim().toLowerCase();
+  const filteredTracks = q
+    ? tracks.filter((t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+    : tracks;
 
   async function like(id: string) {
     if (!name) return;
@@ -554,8 +583,16 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
             ))}
           </div>
           {error && <div className="error">{error}</div>}
-          <ul className="workfm-library-list">
-            {tracks.map((t) => (
+          <input
+            className="workfm-library-search"
+            type="search"
+            placeholder={view === "history" ? "Search history…" : "Search saved uploads…"}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search library"
+          />
+          <ul className="workfm-library-list workfm-library-list-scroll">
+            {filteredTracks.map((t) => (
               <li key={t.id} className="workfm-library-row">
                 <div className="workfm-queue-row-info">
                   <span className="workfm-queue-title">{t.title}</span>
@@ -577,7 +614,9 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
                 </div>
               </li>
             ))}
-            {tracks.length === 0 && <li className="muted">Nothing here yet.</li>}
+            {filteredTracks.length === 0 && (
+              <li className="muted">{tracks.length === 0 ? "Nothing here yet." : "No matches."}</li>
+            )}
           </ul>
         </div>
       )}
@@ -651,6 +690,15 @@ function RoomPage({ slug }: { slug: string }) {
       poll();
     } catch {
       // best-effort — the next poll will resync state if this failed silently
+    }
+  }
+
+  async function voteNext(id: number) {
+    try {
+      await api.workfmVoteNext(slug, id);
+      poll();
+    } catch {
+      // ignore — poll() will resync
     }
   }
 
@@ -813,12 +861,15 @@ function RoomPage({ slug }: { slug: string }) {
 
           <h2 className="workfm-queue-heading">Up next ({state.queue.length})</h2>
           <ul className="workfm-queue-list">
-            {state.queue.map((item) => (
+            {state.queue.map((item, i) => (
               <QueueRow
                 key={item.id}
                 item={item}
                 isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
+                isFirst={i === 0}
+                name={name}
                 onRemove={remove}
+                onVoteNext={voteNext}
               />
             ))}
             {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}

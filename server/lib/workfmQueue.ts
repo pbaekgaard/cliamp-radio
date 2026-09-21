@@ -186,6 +186,7 @@ class WorkFmQueueStream {
   private skipVotes = new Set<string>(); // names who voted to skip the current track
   private repeatVotes = new Set<string>(); // names who voted to repeat the current track
   private repeatArmed = false; // whether the current track will replay itself once it finishes
+  private nextVotes = new Map<number, Set<string>>(); // queue item id -> names who voted to bump it to the front
   private uploadFiles = new Map<number, string>(); // queue item id -> on-disk path, for uploaded mp3s
   private chat: ChatMessage[] = [];
   private nextChatId = 1;
@@ -289,6 +290,20 @@ class WorkFmQueueStream {
     return { ...item, likes, likedByMe };
   }
 
+  /** Attaches this queued item's "vote next" tally — same majority-of-
+   * listeners toggle mechanic as skipVote/repeatVote (see requestMoveToFront
+   * below), but tracked per queue item id instead of "the current track"
+   * since any not-yet-played entry can be voted on independently. */
+  private withNextVote(item: QueueItem, viewerName?: string): { votes: number; total: number; hasVoted: boolean } {
+    const voters = this.nextVotes.get(item.id);
+    const name = viewerName?.toLowerCase();
+    return {
+      votes: voters?.size ?? 0,
+      total: Math.max(this.listenerNames().length, 1),
+      hasVoted: !!name && !!voters?.has(name),
+    };
+  }
+
   /** Top 5 (by like count) songs across *every* WorkFM room — unlike the
    * old room-scoped version, this is just the global "most liked" library
    * view (already filtered to tracks with at least one like), reshaped to
@@ -318,7 +333,7 @@ class WorkFmQueueStream {
 
   list(viewerName?: string): {
     nowPlaying: (QueueItem & { likes: number; likedByMe: boolean; startedAt: number | null }) | null;
-    queue: (QueueItem & { likes: number; likedByMe: boolean })[];
+    queue: (QueueItem & { likes: number; likedByMe: boolean; nextVote: { votes: number; total: number; hasVoted: boolean } })[];
     listeners: string[];
     anonymousListeners: number;
     members: { name: string; listening: boolean }[];
@@ -333,7 +348,7 @@ class WorkFmQueueStream {
     const members = this.activeMemberNames().map((name) => ({ name, listening: listening.has(name) }));
     return {
       nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
-      queue: this.queue.map((item) => this.withLikes(item, viewerName)),
+      queue: this.queue.map((item) => ({ ...this.withLikes(item, viewerName), nextVote: this.withNextVote(item, viewerName) })),
       listeners,
       anonymousListeners: this.anonymousListenerCount(),
       members,
@@ -556,7 +571,52 @@ class WorkFmQueueStream {
     }
     const [removed] = this.queue.splice(idx, 1);
     if (removed?.source === "upload") this.cleanupUpload(removed.id).catch(() => {});
+    this.nextVotes.delete(id);
     return { ok: true };
+  }
+
+  /**
+   * Votes to bump a queued (not-yet-playing) track to the front of the
+   * queue — same majority-of-present-listeners toggle mechanic as
+   * requestSkip/requestRepeat, but tracked per queue item id so any entry
+   * can be voted on independently of the others. Reaching a majority moves
+   * it to the front immediately and clears its votes (a fresh vote is
+   * needed to bump it again from wherever it ends up next).
+   */
+  requestMoveToFront(
+    itemId: number,
+    requestedBy: string
+  ): {
+    ok: boolean;
+    error?: string;
+    moved?: boolean;
+    votes?: number;
+    total?: number;
+    hasVoted?: boolean;
+  } {
+    const idx = this.queue.findIndex((q) => q.id === itemId);
+    if (idx === -1) return { ok: false, error: "not found (maybe it's already playing or was removed)" };
+    if (idx === 0) return { ok: false, error: "that track is already next" };
+    const name = requestedBy.toLowerCase();
+
+    let voters = this.nextVotes.get(itemId);
+    if (!voters) {
+      voters = new Set();
+      this.nextVotes.set(itemId, voters);
+    }
+    // Toggle: voting again removes your vote, in case you change your mind.
+    if (voters.has(name)) voters.delete(name);
+    else voters.add(name);
+
+    const total = Math.max(this.listenerNames().length, 1);
+    const votes = voters.size;
+    if (votes * 2 >= total) {
+      this.nextVotes.delete(itemId);
+      const [moved] = this.queue.splice(idx, 1);
+      if (moved) this.queue.unshift(moved);
+      return { ok: true, moved: true };
+    }
+    return { ok: true, moved: false, votes, total, hasVoted: voters.has(name) };
   }
 
   /**
@@ -655,6 +715,7 @@ class WorkFmQueueStream {
       this.skipVotes.clear();
       this.repeatVotes.clear();
       this.repeatArmed = false;
+      this.nextVotes.delete(item.id);
       // Fallback for the rare case a queue item reached play-time with no
       // known length (e.g. requeued from the library, which doesn't refetch
       // duration) — best-effort only, so the "elapsed / total" indicator

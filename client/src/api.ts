@@ -98,6 +98,9 @@ export interface WorkFmQueueItem {
    * set on `nowPlaying`, null/absent otherwise. Paired with durationSec to
    * render an "elapsed / total" indicator client-side. */
   startedAt?: number | null;
+  /** "Vote next" tally for this queued item — only meaningful for entries
+   * still in `queue` (moving the currently-playing track doesn't apply). */
+  nextVote?: WorkFmNextVoteState;
 }
 
 export interface WorkFmChatMessage {
@@ -115,6 +118,12 @@ export interface WorkFmSkipVoteState {
 
 export interface WorkFmRepeatVoteState {
   armed: boolean;
+  votes: number;
+  total: number;
+  hasVoted: boolean;
+}
+
+export interface WorkFmNextVoteState {
   votes: number;
   total: number;
   hasVoted: boolean;
@@ -167,6 +176,14 @@ export interface WorkFmSkipResult {
 export interface WorkFmRepeatResult {
   ok: true;
   armed?: boolean;
+  votes?: number;
+  total?: number;
+  hasVoted?: boolean;
+}
+
+export interface WorkFmNextResult {
+  ok: true;
+  moved?: boolean;
   votes?: number;
   total?: number;
   hasVoted?: boolean;
@@ -273,6 +290,7 @@ export const api = {
   workfmRemoveFromQueue: (slug: string, id: number) => request(`/api/workfm/rooms/${slug}/queue/${id}`, { method: "DELETE" }),
   workfmSkipCurrent: (slug: string) => request<WorkFmSkipResult>(`/api/workfm/rooms/${slug}/queue/current/skip`, { method: "POST" }),
   workfmRepeatCurrent: (slug: string) => request<WorkFmRepeatResult>(`/api/workfm/rooms/${slug}/queue/current/repeat`, { method: "POST" }),
+  workfmVoteNext: (slug: string, id: number) => request<WorkFmNextResult>(`/api/workfm/rooms/${slug}/queue/${id}/next`, { method: "POST" }),
   workfmPostChat: (slug: string, text: string) =>
     request<WorkFmChatMessage>(`/api/workfm/rooms/${slug}/chat`, { method: "POST", body: JSON.stringify({ text }) }),
   workfmRequeue: (slug: string, id: string) =>

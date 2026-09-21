@@ -305,6 +305,16 @@ const server = Bun.serve({
       return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
     }
 
+    const workfmRoomQueueVoteNextMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/(\d+)\/next$/);
+    if (workfmRoomQueueVoteNextMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueVoteNextMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const result = room.stream.requestMoveToFront(Number(workfmRoomQueueVoteNextMatch[2]), identity.name);
+      return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
+    }
+
     const workfmRoomSkipMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/current\/skip$/);
     if (workfmRoomSkipMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomSkipMatch[1]!));
