@@ -1,7 +1,7 @@
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { relayPaced } from "./audioRelay";
-import { attachSavedUpload, getLibraryTrack, listMostLiked, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
 // ---------------------------------------------------------------------------
@@ -331,6 +331,30 @@ class WorkFmQueueStream {
     }));
   }
 
+  /** Top 5 (by play count) songs across *every* WorkFM room — same global
+   * library view as roomLeaderboard, just sorted by how many times a track
+   * has actually played rather than its like count. */
+  private roomMostPlayed(
+    viewerName: string | undefined,
+    limit = 5
+  ): {
+    libraryId: string;
+    title: string;
+    artist: string;
+    playCount: number;
+    addedBy: string;
+    available: boolean;
+  }[] {
+    return listMostPlayed(viewerName, limit).map((e) => ({
+      libraryId: e.id,
+      title: e.title,
+      artist: e.artist,
+      playCount: e.playCount,
+      addedBy: e.addedBy,
+      available: e.available,
+    }));
+  }
+
   list(viewerName?: string): {
     nowPlaying: (QueueItem & { likes: number; likedByMe: boolean; startedAt: number | null }) | null;
     queue: (QueueItem & { likes: number; likedByMe: boolean; nextVote: { votes: number; total: number; hasVoted: boolean } })[];
@@ -338,6 +362,7 @@ class WorkFmQueueStream {
     anonymousListeners: number;
     members: { name: string; listening: boolean }[];
     leaderboard: ReturnType<WorkFmQueueStream["roomLeaderboard"]>;
+    mostPlayed: ReturnType<WorkFmQueueStream["roomMostPlayed"]>;
     skipVote: { votes: number; total: number; hasVoted: boolean };
     repeatVote: { armed: boolean; votes: number; total: number; hasVoted: boolean };
     chat: ChatMessage[];
@@ -353,6 +378,7 @@ class WorkFmQueueStream {
       anonymousListeners: this.anonymousListenerCount(),
       members,
       leaderboard: this.roomLeaderboard(viewerName),
+      mostPlayed: this.roomMostPlayed(viewerName),
       skipVote: {
         votes: this.skipVotes.size,
         total: Math.max(listeners.length, 1),

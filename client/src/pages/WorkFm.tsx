@@ -4,6 +4,7 @@ import {
   api,
   type WorkFmChatMessage,
   type WorkFmLeaderboardEntry,
+  type WorkFmMostPlayedEntry,
   type WorkFmLibraryTrack,
   type WorkFmLibraryView,
   type WorkFmMember,
@@ -509,6 +510,58 @@ function SongLeaderboardPanel({
   );
 }
 
+function MostPlayedPanel({
+  mostPlayed,
+  slug,
+  name,
+  onRequeued,
+}: {
+  mostPlayed: WorkFmMostPlayedEntry[];
+  slug: string;
+  name: string | null;
+  onRequeued: () => void;
+}) {
+  async function requeue(id: string) {
+    if (!name) return;
+    try {
+      await api.workfmRequeue(slug, id);
+      onRequeued();
+    } catch {
+      // ignore — the requeue button already disables itself when unavailable
+    }
+  }
+
+  return (
+    <aside className="workfm-most-played-panel">
+      <h2 className="workfm-listeners-heading">🔁 Most played songs</h2>
+      <p className="muted workfm-leaderboard-hint">Top 5 most-played songs across every WorkFM room</p>
+      <ul className="workfm-library-list">
+        {mostPlayed.map((t, i) => (
+          <li key={t.libraryId} className="workfm-library-row">
+            <div className="workfm-queue-row-info">
+              <span className="workfm-queue-title">
+                {i + 1}. {t.title}
+              </span>
+              <span className="workfm-queue-artist">{t.artist}</span>
+            </div>
+            <div className="workfm-library-row-actions">
+              <span className="muted">
+                {t.playCount} {t.playCount === 1 ? "play" : "plays"}
+              </span>
+              {t.available && (
+                <button className="btn-secondary" onClick={() => requeue(t.libraryId)} disabled={!name}>
+                  Requeue
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+        {mostPlayed.length === 0 && <li className="muted">Nothing's played yet.</li>}
+      </ul>
+    </aside>
+  );
+}
+
 const LIBRARY_TABS: { view: WorkFmLibraryView; label: string }[] = [
   { view: "history", label: "History" },
   { view: "saved", label: "Saved uploads" },
@@ -639,6 +692,7 @@ function RoomPage({ slug }: { slug: string }) {
     anonymousListeners: 0,
     members: [],
     leaderboard: [],
+    mostPlayed: [],
     skipVote: { votes: 0, total: 1, hasVoted: false },
     repeatVote: { armed: false, votes: 0, total: 1, hasVoted: false },
     chat: [],
@@ -809,58 +863,61 @@ function RoomPage({ slug }: { slug: string }) {
 
       <div className="workfm-layout">
         <div className="workfm-main">
-          <div className="workfm-now-playing">
-            <p className="workfm-now-playing-label">Now playing</p>
-            {state.nowPlaying ? (
-              <div className="workfm-now-playing-card">
-                <div>
-                  <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
-                  <div className="muted">{state.nowPlaying.artist}</div>
-                  <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
-                  <div className="muted">
-                    requested by <strong>{state.nowPlaying.addedBy}</strong>
+          <div className="workfm-top-row">
+            <MostPlayedPanel mostPlayed={state.mostPlayed} slug={slug} name={name} onRequeued={poll} />
+            <div className="workfm-now-playing">
+              <p className="workfm-now-playing-label">Now playing</p>
+              {state.nowPlaying ? (
+                <div className="workfm-now-playing-card">
+                  <div>
+                    <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
+                    <div className="muted">{state.nowPlaying.artist}</div>
+                    <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
+                    <div className="muted">
+                      requested by <strong>{state.nowPlaying.addedBy}</strong>
+                    </div>
                   </div>
+                  {name && (
+                    <div className="workfm-now-playing-actions">
+                      <button
+                        className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
+                        onClick={likeNowPlaying}
+                        title="Like this song"
+                      >
+                        ♥ {state.nowPlaying.likes}
+                      </button>
+                      <button
+                        className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
+                        onClick={skip}
+                        title={
+                          state.skipVote.hasVoted
+                            ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                            : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
+                        }
+                      >
+                        <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
+                      </button>
+                      <button
+                        className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
+                        onClick={repeat}
+                        title={
+                          state.repeatVote.hasVoted
+                            ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                            : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
+                        }
+                      >
+                        <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {name && (
-                  <div className="workfm-now-playing-actions">
-                    <button
-                      className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
-                      onClick={likeNowPlaying}
-                      title="Like this song"
-                    >
-                      ♥ {state.nowPlaying.likes}
-                    </button>
-                    <button
-                      className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
-                      onClick={skip}
-                      title={
-                        state.skipVote.hasVoted
-                          ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                          : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
-                      }
-                    >
-                      <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
-                    </button>
-                    <button
-                      className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
-                      onClick={repeat}
-                      title={
-                        state.repeatVote.hasVoted
-                          ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                          : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
-                      }
-                    >
-                      <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
-            )}
-            {name && state.nowPlaying && state.repeatVote.armed && (
-              <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
-            )}
+              ) : (
+                <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
+              )}
+              {name && state.nowPlaying && state.repeatVote.armed && (
+                <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
+              )}
+            </div>
           </div>
 
           {name && (

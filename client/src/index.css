@@ -880,6 +880,36 @@ input {
   min-width: 0;
 }
 
+.workfm-top-row {
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+  margin-bottom: 20px;
+}
+
+.workfm-top-row .workfm-now-playing {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.workfm-most-played-panel {
+  flex-shrink: 0;
+  width: 260px;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+@media (max-width: 900px) {
+  .workfm-top-row {
+    flex-direction: column;
+  }
+  .workfm-most-played-panel {
+    width: 100%;
+  }
+}
+
 .workfm-listeners-panel {
   flex-shrink: 0;
   width: 220px;

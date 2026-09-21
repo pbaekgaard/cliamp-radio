@@ -146,6 +146,15 @@ export interface WorkFmLeaderboardEntry {
   available: boolean;
 }
 
+export interface WorkFmMostPlayedEntry {
+  libraryId: string;
+  title: string;
+  artist: string;
+  playCount: number;
+  addedBy: string;
+  available: boolean;
+}
+
 export interface WorkFmQueueState {
   roomName: string;
   nowPlaying: WorkFmQueueItem | null;
@@ -160,6 +169,9 @@ export interface WorkFmQueueState {
   /** Top 5 most-liked songs across every WorkFM room (global, not scoped to
    * this one) — only tracks with at least one like show up. */
   leaderboard: WorkFmLeaderboardEntry[];
+  /** Top 5 most-played songs across every WorkFM room (global, not scoped
+   * to this one), sorted by play count. */
+  mostPlayed: WorkFmMostPlayedEntry[];
   skipVote: WorkFmSkipVoteState;
   repeatVote: WorkFmRepeatVoteState;
   chat: WorkFmChatMessage[];

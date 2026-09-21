@@ -205,6 +205,14 @@ export function listMostLiked(viewerName?: string, limit = 50): LibraryTrackSumm
     .map((e) => summarize(e, viewerName));
 }
 
+export function listMostPlayed(viewerName?: string, limit = 50): LibraryTrackSummary[] {
+  return [...library.values()]
+    .filter((e) => e.playCount > 0)
+    .sort((a, b) => b.playCount - a.playCount || b.lastPlayedAt - a.lastPlayedAt)
+    .slice(0, limit)
+    .map((e) => summarize(e, viewerName));
+}
+
 export function listSavedUploads(viewerName?: string, limit = 50): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.source === "upload" && !!e.savedFilePath)
