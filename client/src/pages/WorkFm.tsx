@@ -701,7 +701,7 @@ function RoomPage({ slug }: { slug: string }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { nowPlaying, toggle, stop } = useRadioPlayer();
+  const { nowPlaying, toggle, play, stop } = useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
   const playing = nowPlaying?.url === streamUrl;
   const navigate = useNavigate();
@@ -843,7 +843,17 @@ function RoomPage({ slug }: { slug: string }) {
       </div>
 
       {showJoinModal && (
-        <JoinRoomModal onClose={() => setShowJoinModal(false)} onJoin={(yourName) => identify(yourName, slug)} />
+        <JoinRoomModal
+          onClose={() => setShowJoinModal(false)}
+          onJoin={async (yourName) => {
+            // Clicking "Join"/"Generate Random" is a genuine user gesture,
+            // so kick off playback right here (before the await) rather
+            // than making the visitor separately press "Listen in"
+            // afterwards — most people joining a room want to hear it.
+            play(streamUrl, "Radio Bækgaard");
+            await identify(yourName, slug);
+          }}
+        />
       )}
       {showUploadModal && <UploadTrackModal slug={slug} onClose={() => setShowUploadModal(false)} onUploaded={poll} />}
 
