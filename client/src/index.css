@@ -886,8 +886,6 @@ input {
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 18px;
-  position: sticky;
-  top: 84px;
 }
 
 .workfm-listeners-heading {
