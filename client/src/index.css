@@ -947,6 +947,11 @@ input {
   .workfm-layout {
     flex-direction: column;
   }
+  .workfm-sidebar {
+    width: 100%;
+    position: static;
+    top: auto;
+  }
   .workfm-listeners-panel {
     width: 100%;
     position: static;
