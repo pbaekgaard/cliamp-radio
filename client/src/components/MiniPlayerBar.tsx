@@ -3,9 +3,14 @@ import { useRadioPlayer } from "../RadioPlayerContext";
 // A small persistent bar shown whenever a "Tune in" button is playing
 // something, so listeners always have an obvious way to see what's
 // streaming and stop it — regardless of which page they navigate to.
+//
+// WorkFM's stream is deliberately excluded: being on the room page *is*
+// listening (no separate tune-in/pause step — see WorkFm.tsx), so a global
+// "Stop" button for it here would contradict that and would also be
+// pointless, since navigating away from the room already stops it.
 export default function MiniPlayerBar() {
   const { nowPlaying, stop, volume, setVolume } = useRadioPlayer();
-  if (!nowPlaying) return null;
+  if (!nowPlaying || nowPlaying.url.startsWith("/cliamp-radio/live/workfm/")) return null;
 
   return (
     <div className="mini-player-bar">

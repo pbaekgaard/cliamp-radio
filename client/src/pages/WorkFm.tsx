@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   api,
   type WorkFmChatMessage,
@@ -646,11 +647,22 @@ function RoomPage({ slug }: { slug: string }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { nowPlaying, toggle, stop } = useRadioPlayer();
+  const { play, stop, volume, setVolume } = useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
-  const playing = nowPlaying?.url === streamUrl;
+  const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+
+  // Being on the room page *is* listening — there's no separate "tune in"
+  // step or pause control, so this never leaves anyone in the room stuck
+  // listening to nothing. Leaving the page (navigating elsewhere, or
+  // closing the tab) stops the stream via the cleanup below, so nobody
+  // keeps hearing WorkFM (or sees its mini player bar) once they're gone.
+  useEffect(() => {
+    play(streamUrl, "Radio Bækgaard");
+    return () => stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamUrl]);
 
   const poll = useCallback(async () => {
     try {
@@ -731,9 +743,11 @@ function RoomPage({ slug }: { slug: string }) {
   }
 
   async function handleLeave() {
-    // Leaving means tuning out entirely, not just forgetting the name.
-    stop();
+    // "Leave room" now means actually leaving — forget the identity and
+    // navigate back to the overview, which stops the stream via this
+    // component's unmount cleanup (see the auto-play effect above).
     await forget();
+    navigate("/");
   }
 
   if (roomMissing) {
@@ -758,15 +772,23 @@ function RoomPage({ slug }: { slug: string }) {
           )}
         </div>
         <div className="header-actions">
+          <span className="workfm-volume-control">
+            <span aria-hidden="true">{volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}</span>
+            <input
+              type="range"
+              className="mini-player-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              onChange={(e) => setVolume(Number(e.target.value) / 100)}
+              aria-label="Volume (only affects your playback)"
+              title="Volume (only affects your playback)"
+            />
+          </span>
           {name ? (
-            <>
-              <button className="btn-secondary" onClick={() => toggle(streamUrl, "Radio Bækgaard")}>
-                {playing ? "Pause stream" : "▶ Listen live"}
-              </button>
-              <button className="btn-danger" onClick={handleLeave}>
-                Leave room
-              </button>
-            </>
+            <button className="btn-danger" onClick={handleLeave}>
+              Leave room
+            </button>
           ) : (
             <button className="btn-primary" onClick={() => setShowJoinModal(true)}>
               Join

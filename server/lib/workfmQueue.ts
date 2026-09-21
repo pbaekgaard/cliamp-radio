@@ -779,12 +779,27 @@ class WorkFmQueueStream {
 
     const ytdlpStderr = drainText(ytdlp.stderr);
     const ffmpegStderr = drainText(ffmpeg.stderr);
+    // Bridges the gap between "this track just started spinning up" and
+    // "relayPaced() has prebuffered enough of it to start broadcasting" —
+    // yt-dlp resolving/starting the download plus the ~2s prebuffer below
+    // easily adds up to a few seconds of *nothing at all* being sent to
+    // subscribers otherwise, which stalls players (heard as a stutter/gap
+    // on every track change) and can even make some drop the connection
+    // outright. Stopped the instant real audio starts flowing.
+    const stopBridge = this.startBridgeSilence(gen);
+    let firstChunk = true;
 
     try {
       const reader = ffmpeg.stdout.getReader();
       await relayPaced(
         reader,
-        (chunk) => this.broadcast(chunk),
+        (chunk) => {
+          if (firstChunk) {
+            firstChunk = false;
+            stopBridge();
+          }
+          this.broadcast(chunk);
+        },
         () => this.currentGen !== gen,
         AUDIO_BYTES_PER_SEC,
         PREBUFFER_BYTES
@@ -801,6 +816,7 @@ class WorkFmQueueStream {
         );
       }
     } finally {
+      stopBridge();
       this.ytdlpProc = null;
       this.ffmpegProc = null;
       try {
@@ -829,6 +845,11 @@ class WorkFmQueueStream {
     this.ytdlpProc = null;
     this.ffmpegProc = ffmpeg;
     const ffmpegStderr = drainText(ffmpeg.stderr);
+    // Uploads start playing back much faster than a YouTube fetch (no
+    // network download to wait on), but ffmpeg's own process startup is
+    // still a small gap worth bridging for consistency.
+    const stopBridge = this.startBridgeSilence(gen);
+    let firstChunk = true;
 
     try {
       const reader = ffmpeg.stdout.getReader();
@@ -836,7 +857,13 @@ class WorkFmQueueStream {
         if (this.currentGen !== gen) return; // skipped mid-track
         const { done, value } = await reader.read();
         if (done) break;
-        if (value && value.length > 0) this.broadcast(value);
+        if (value && value.length > 0) {
+          if (firstChunk) {
+            firstChunk = false;
+            stopBridge();
+          }
+          this.broadcast(value);
+        }
       }
       const ffExit = await ffmpeg.exited;
       if (ffExit !== 0 && this.currentGen === gen) {
@@ -844,6 +871,7 @@ class WorkFmQueueStream {
         throw new Error(`ffmpeg exited with code ${ffExit}` + (ffErr ? `\nffmpeg stderr: ${ffErr}` : ""));
       }
     } finally {
+      stopBridge();
       this.ffmpegProc = null;
       try {
         ffmpeg.kill();
@@ -884,6 +912,50 @@ class WorkFmQueueStream {
         // already exited
       }
     }
+  }
+
+  /**
+   * Starts a short-lived, genuinely mp3-encoded silence broadcast (same
+   * `anullsrc` trick as playSilence) that runs in the background until
+   * stopped — used by playEntry/playUpload to bridge the gap between a
+   * track starting to load and its first real audio chunk being ready,
+   * instead of sending subscribers literally nothing for that window (see
+   * callers for why that matters). Deliberately not tracked in
+   * this.ytdlpProc/ffmpegProc: it self-terminates the instant `gen` is
+   * superseded (e.g. a skip lands mid-bridge), so killPlayback() doesn't
+   * need to know about it.
+   */
+  private startBridgeSilence(gen: number): () => void {
+    let stopped = false;
+    const ffmpeg = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", ...AUDIO_ARGS, "pipe:1"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    const kill = () => {
+      try {
+        ffmpeg.kill();
+      } catch {
+        // already exited
+      }
+    };
+    (async () => {
+      try {
+        const reader = ffmpeg.stdout.getReader();
+        while (!stopped && this.currentGen === gen) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) this.broadcast(value);
+        }
+      } catch {
+        // best-effort filler — a failure here just means a slightly longer gap
+      } finally {
+        kill();
+      }
+    })();
+    return () => {
+      stopped = true;
+      kill();
+    };
   }
 
   private broadcast(chunk: Uint8Array) {

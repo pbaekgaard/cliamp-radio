@@ -1301,7 +1301,8 @@ input {
   flex-shrink: 1;
 }
 
-.mini-player-volume {
+.mini-player-volume,
+.workfm-volume-control {
   display: flex;
   align-items: center;
   gap: 6px;
