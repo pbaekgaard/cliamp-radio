@@ -738,11 +738,7 @@ input {
 
 /* --- WorkFM --- */
 .workfm-page {
-  /* Wider than most other pages here since the room now has a left "Most
-   * played" column (see .workfm-page-body) in addition to the existing
-   * main content + right sidebar — the original 980px was sized for just
-   * the latter two. */
-  max-width: 1280px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 32px 20px 60px;
 }
@@ -873,74 +869,30 @@ input {
   padding: 12px 20px;
 }
 
+.workfm-layout {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+}
+
 .workfm-main {
   flex: 1;
   min-width: 0;
 }
 
-.workfm-page-body {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-
-.workfm-page-main {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Groups Most played + Song leaderboard into one sticky left-hand column,
- * collapsible behind the hamburger toggle on mobile (see media query
- * below and .workfm-hamburger-btn). */
-.workfm-extras-panel {
-  flex-shrink: 0;
-  width: 260px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  position: sticky;
-  top: 84px;
-}
-
-.workfm-most-played-panel,
 .workfm-listeners-panel {
-  width: 100%;
+  flex-shrink: 0;
+  width: 220px;
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 18px;
-}
-
-.workfm-hamburger-btn {
-  display: none;
-}
-
-@media (max-width: 900px) {
-  .workfm-page-body {
-    flex-direction: column;
-  }
-  .workfm-hamburger-btn {
-    display: inline-flex;
-  }
-  .workfm-extras-panel {
-    display: none;
-    width: 100%;
-    position: static;
-  }
-  .workfm-extras-panel.workfm-extras-open {
-    display: flex;
-  }
+  position: sticky;
+  top: 84px;
 }
 
 .workfm-listeners-heading {
   margin: 0 0 12px;
   font-size: 15px;
-}
-
-.workfm-members-panel {
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 16px 18px;
-  margin-bottom: 24px;
 }
 
 .workfm-listeners-list {
@@ -987,6 +939,16 @@ input {
 .workfm-leaderboard-hint {
   margin: -8px 0 12px;
   font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .workfm-layout {
+    flex-direction: column;
+  }
+  .workfm-listeners-panel {
+    width: 100%;
+    position: static;
+  }
 }
 
 .workfm-now-playing {
@@ -1135,13 +1097,31 @@ input {
   font-size: 13px;
 }
 
+.workfm-sidebar {
+  flex-shrink: 0;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 84px;
+  align-self: stretch;
+}
+
+.workfm-listeners-panel,
+.workfm-chat-panel,
+.workfm-library-panel {
+  width: 100%;
+}
+
 .workfm-chat-panel {
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  min-height: 320px;
+  flex: 1;
+  min-height: 520px;
 }
 
 .workfm-chat-list {
@@ -1256,8 +1236,9 @@ input {
 }
 
 @media (max-width: 720px) {
-  .workfm-extras-panel {
+  .workfm-sidebar {
     width: 100%;
+    position: static;
   }
 }
 
