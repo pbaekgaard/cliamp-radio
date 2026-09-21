@@ -12,10 +12,13 @@ import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, 
 // play back-to-back in the order they were added (FIFO, no shuffling) and
 // are broadcast to every listener at the same playback position, the same
 // way playlistStream.ts does for the fixed-playlist stations. When the
-// queue runs dry, playback just pauses (no bytes sent) until the next video
-// is added — there's no "idle timeout" teardown of *playback* here, since
-// this is meant to always be ready to pick back up the instant someone
-// queues something. (Whole *rooms* — see workfmRooms.ts, which each own one
+// queue runs dry, the stream keeps broadcasting encoded silence (see
+// playSilence() below) rather than going dead — the HTTP connection stays
+// open and bytes keep flowing, so a listener already tuned in hears the
+// next track the instant it's added, with no need to reconnect — there's
+// no "idle timeout" teardown of *playback* here, since this is meant to
+// always be ready to pick back up the instant someone queues something.
+// (Whole *rooms* — see workfmRooms.ts, which each own one
 // WorkFmQueueStream instance — do get torn down after being empty a while.)
 // ---------------------------------------------------------------------------
 

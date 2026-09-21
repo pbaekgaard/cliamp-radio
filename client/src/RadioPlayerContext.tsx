@@ -124,6 +124,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
   function stop() {
     clearReconnect();
+    // Set synchronously (not just via the effect above, which only runs on
+    // the next render) so the `pause` event this triggers is recognized as
+    // intentional by handlePause below, instead of being auto-resumed.
+    nowPlayingRef.current = null;
     const audio = audioRef.current;
     if (audio) audio.pause();
     setNowPlaying(null);
@@ -171,11 +175,31 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     reconnectAttemptsRef.current = 0;
   }
 
+  // Some browsers silently pause long-running near-silent audio (e.g. the
+  // WorkFM room idling between songs) to save power, without firing an
+  // "error" or "ended" event — previously the only way to notice was the
+  // listener realizing there's no sound and manually pressing pause/play
+  // themselves. Any pause we didn't ask for (stop() nulls the ref *before*
+  // pausing, precisely so it's excluded here) is resumed automatically.
+  function handlePause() {
+    const audio = audioRef.current;
+    if (audio && nowPlayingRef.current) {
+      audio.play().catch(() => armAutoplayRetry());
+    }
+  }
+
   return (
     <RadioPlayerContext.Provider value={{ nowPlaying, toggle, play, stop, volume, setVolume }}>
       {children}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={audioRef} preload="none" onEnded={handleDrop} onError={handleDrop} onPlaying={handlePlaying} />
+      <audio
+        ref={audioRef}
+        preload="none"
+        onEnded={handleDrop}
+        onError={handleDrop}
+        onPlaying={handlePlaying}
+        onPause={handlePause}
+      />
     </RadioPlayerContext.Provider>
   );
 }
