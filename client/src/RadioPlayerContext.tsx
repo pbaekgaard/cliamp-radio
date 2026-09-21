@@ -17,9 +17,8 @@ interface RadioPlayerState {
   nowPlaying: NowPlaying | null;
   /** Toggles playback of `url` — pauses if it's already playing, otherwise switches to it. */
   toggle: (url: string, label: string) => void;
-  /** Unconditionally (re)starts playback of `url`, unlike `toggle` — used by
-   * WorkFm, which auto-plays for as long as you're on the room page rather
-   * than needing an explicit "tune in" click to start it. */
+  /** Unconditionally (re)starts playback of `url`, unlike `toggle` — used
+   * internally by `toggle` to begin a new stream. */
   play: (url: string, label: string) => void;
   stop: () => void;
   /** 0–1, local to this browser only — doesn't affect anyone else listening. */
@@ -32,11 +31,9 @@ const RadioPlayerContext = createContext<RadioPlayerState | null>(null);
 // How many times a dropped stream is retried (with backoff) before giving
 // up and surfacing as "stopped" — live streams occasionally hiccup (a brief
 // server-side stall while switching tracks, a network blip), and the
-// <audio> element doesn't retry those on its own, it just goes silent. This
-// matters more now that WorkFm has no manual "Listen live" button to
-// re-press: from a listener's perspective, being in the room means being
-// tuned in, so a transient glitch needs to self-heal instead of just
-// leaving them silently disconnected.
+// <audio> element doesn't retry those on its own, it just goes silent.
+// Self-healing here means a transient glitch doesn't force listeners to
+// notice they've gone silent and manually re-press "Listen in".
 const MAX_RECONNECT_ATTEMPTS = 6;
 
 // A single shared <audio> element for every "Tune in" button across the

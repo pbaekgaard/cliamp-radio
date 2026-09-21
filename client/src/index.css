@@ -873,12 +873,6 @@ input {
   padding: 12px 20px;
 }
 
-.workfm-layout {
-  display: flex;
-  gap: 32px;
-  align-items: flex-start;
-}
-
 .workfm-main {
   flex: 1;
   min-width: 0;
@@ -895,39 +889,58 @@ input {
   min-width: 0;
 }
 
-.workfm-most-played-panel {
+/* Groups Most played + Song leaderboard into one sticky left-hand column,
+ * collapsible behind the hamburger toggle on mobile (see media query
+ * below and .workfm-hamburger-btn). */
+.workfm-extras-panel {
   flex-shrink: 0;
   width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 84px;
+}
+
+.workfm-most-played-panel,
+.workfm-listeners-panel {
+  width: 100%;
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 18px;
-  position: sticky;
-  top: 84px;
+}
+
+.workfm-hamburger-btn {
+  display: none;
 }
 
 @media (max-width: 900px) {
   .workfm-page-body {
     flex-direction: column;
   }
-  .workfm-most-played-panel {
+  .workfm-hamburger-btn {
+    display: inline-flex;
+  }
+  .workfm-extras-panel {
+    display: none;
     width: 100%;
     position: static;
   }
-}
-
-.workfm-listeners-panel {
-  flex-shrink: 0;
-  width: 220px;
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 16px 18px;
-  position: sticky;
-  top: 84px;
+  .workfm-extras-panel.workfm-extras-open {
+    display: flex;
+  }
 }
 
 .workfm-listeners-heading {
   margin: 0 0 12px;
   font-size: 15px;
+}
+
+.workfm-members-panel {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 24px;
 }
 
 .workfm-listeners-list {
@@ -974,16 +987,6 @@ input {
 .workfm-leaderboard-hint {
   margin: -8px 0 12px;
   font-size: 13px;
-}
-
-@media (max-width: 720px) {
-  .workfm-layout {
-    flex-direction: column;
-  }
-  .workfm-listeners-panel {
-    width: 100%;
-    position: static;
-  }
 }
 
 .workfm-now-playing {
@@ -1132,31 +1135,13 @@ input {
   font-size: 13px;
 }
 
-.workfm-sidebar {
-  flex-shrink: 0;
-  width: 380px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  position: sticky;
-  top: 84px;
-  align-self: stretch;
-}
-
-.workfm-listeners-panel,
-.workfm-chat-panel,
-.workfm-library-panel {
-  width: 100%;
-}
-
 .workfm-chat-panel {
   background: var(--panel);
   border-radius: 10px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 520px;
+  min-height: 320px;
 }
 
 .workfm-chat-list {
@@ -1271,9 +1256,8 @@ input {
 }
 
 @media (max-width: 720px) {
-  .workfm-sidebar {
+  .workfm-extras-panel {
     width: 100%;
-    position: static;
   }
 }
 
@@ -1336,8 +1320,7 @@ input {
   flex-shrink: 1;
 }
 
-.mini-player-volume,
-.workfm-volume-control {
+.mini-player-volume {
   display: flex;
   align-items: center;
   gap: 6px;
