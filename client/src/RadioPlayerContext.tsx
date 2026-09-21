@@ -99,7 +99,21 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     clearReconnect();
     audio.src = url;
     audio.volume = volume;
-    audio.play().catch(() => armAutoplayRetry());
+    // Muted autoplay is unconditionally allowed by every major browser's
+    // autoplay policy, unlike autoplay-with-sound (which requires a prior
+    // user gesture or a high per-site "media engagement" score). Starting
+    // muted then unmuting a moment later — once playback has actually begun
+    // — sidesteps that restriction without needing a click, since the
+    // policy is only enforced at the `.play()` call itself, not when a
+    // already-playing element is later unmuted. If even the muted attempt
+    // is blocked (rare), fall back to arming a gesture-triggered retry.
+    audio.muted = true;
+    audio
+      .play()
+      .then(() => {
+        audio.muted = false;
+      })
+      .catch(() => armAutoplayRetry());
     setNowPlaying({ url, label });
   }
 
@@ -144,7 +158,15 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       // Re-set src (not just .play()) so a stalled/broken fetch actually
       // reconnects from scratch rather than retrying the same dead one.
       audioRef.current.src = stillWanted.url;
-      audioRef.current.play().catch(() => armAutoplayRetry());
+      // Same muted-then-unmute fallback as the initial play() — a
+      // reconnect can in principle hit the same autoplay restriction.
+      audioRef.current.muted = true;
+      audioRef.current
+        .play()
+        .then(() => {
+          if (audioRef.current) audioRef.current.muted = false;
+        })
+        .catch(() => armAutoplayRetry());
     }, delay);
   }
 
