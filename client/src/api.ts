@@ -77,6 +77,14 @@ export interface PlaylistStreamStatus {
   nowPlaying: { artist: string; title: string } | null;
 }
 
+export interface WorkFmSearchResult {
+  videoId: string;
+  title: string;
+  uploader: string | null;
+  durationSec?: number;
+  thumbnail?: string;
+}
+
 export interface WorkFmQueueItem {
   id: number;
   videoId: string;
@@ -281,6 +289,8 @@ export const api = {
   workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),
   workfmAddToQueue: (slug: string, url: string) =>
     request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue`, { method: "POST", body: JSON.stringify({ url }) }),
+  workfmSearch: (slug: string, q: string) =>
+    request<{ results: WorkFmSearchResult[] }>(`/api/workfm/rooms/${slug}/search?q=${encodeURIComponent(q)}`),
   workfmUploadToQueue: async (
     slug: string,
     file: File,

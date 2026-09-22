@@ -9,6 +9,7 @@ import {
   type WorkFmMember,
   type WorkFmQueueItem,
   type WorkFmQueueState,
+  type WorkFmSearchResult,
 } from "../api";
 import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
@@ -23,7 +24,14 @@ function timeAgo(ts: number): string {
   return `${hours}h ago`;
 }
 
-/** Formats a duration in seconds as "m:ss" (or "h:mm:ss" past an hour). */
+/** Distinguishes a pasted YouTube link — which can be added directly — from
+ * anything else typed into the add-track box (a free-text search query, or
+ * a Spotify link, both of which go through the search dropdown instead). */
+function isYouTubeUrl(value: string): boolean {
+  return /^https?:\/\/(www\.|music\.)?(youtube\.com|youtu\.be)\//i.test(value.trim());
+}
+
+
 function formatClock(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(s / 3600);
@@ -637,6 +645,9 @@ function RoomPage({ slug }: { slug: string }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [searchResults, setSearchResults] = useState<WorkFmSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
   const { nowPlaying, toggle, play, stop } = useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
   const playing = nowPlaying?.url === streamUrl;
@@ -663,11 +674,65 @@ function RoomPage({ slug }: { slug: string }) {
 
   async function addToQueue(e: React.FormEvent) {
     e.preventDefault();
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    if (!isYouTubeUrl(trimmed)) {
+      // Enter pressed on a search query (rather than a pasted link) — add
+      // the top result, same as clicking the first row in the dropdown.
+      if (searchResults[0]) await addFromSearch(searchResults[0]);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await api.workfmAddToQueue(slug, url.trim());
+      await api.workfmAddToQueue(slug, trimmed);
       setUrl("");
+      setSearchResults([]);
+      setShowResults(false);
+      poll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Live-searches YouTube as the user types a non-URL query (debounced so we
+  // don't spawn a yt-dlp process on every keystroke). Pasted links skip this
+  // entirely and go straight through the existing add-by-URL path.
+  useEffect(() => {
+    const query = url.trim();
+    if (!query || isYouTubeUrl(query)) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const id = setTimeout(async () => {
+      try {
+        const { results } = await api.workfmSearch(slug, query);
+        if (!cancelled) setSearchResults(results);
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [url, slug]);
+
+  async function addFromSearch(result: WorkFmSearchResult) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.workfmAddToQueue(slug, `https://www.youtube.com/watch?v=${result.videoId}`);
+      setUrl("");
+      setSearchResults([]);
+      setShowResults(false);
       poll();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -841,12 +906,54 @@ function RoomPage({ slug }: { slug: string }) {
 
           {name && (
             <>
-              <form className="workfm-add-form" onSubmit={addToQueue}>
-                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a YouTube video link…" />
-                <button className="btn-primary" type="submit" disabled={submitting || !url.trim()}>
-                  {submitting ? "Adding…" : "Add to queue"}
-                </button>
-              </form>
+              <div className="workfm-add-wrap">
+                <form className="workfm-add-form" onSubmit={addToQueue}>
+                  <input
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
+                      setShowResults(true);
+                    }}
+                    onFocus={() => setShowResults(true)}
+                    onBlur={() => setTimeout(() => setShowResults(false), 150)}
+                    placeholder="Search YouTube, or paste a YouTube/Spotify link…"
+                  />
+                  <button
+                    className="btn-primary"
+                    type="submit"
+                    disabled={submitting || !url.trim() || (!isYouTubeUrl(url) && searchResults.length === 0)}
+                  >
+                    {submitting ? "Adding…" : "Add to queue"}
+                  </button>
+                </form>
+                {showResults && url.trim() && !isYouTubeUrl(url) && (
+                  <div className="workfm-search-results">
+                    {searching && <div className="workfm-search-status muted">Searching…</div>}
+                    {!searching && searchResults.length === 0 && (
+                      <div className="workfm-search-status muted">No results</div>
+                    )}
+                    {searchResults.map((r) => (
+                      <button
+                        key={r.videoId}
+                        type="button"
+                        className="workfm-search-result"
+                        disabled={submitting}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => addFromSearch(r)}
+                      >
+                        {r.thumbnail && <img src={r.thumbnail} alt="" />}
+                        <div className="workfm-search-result-meta">
+                          <div className="workfm-search-result-title">{r.title}</div>
+                          <div className="muted">
+                            {r.uploader ?? "Unknown"}
+                            {typeof r.durationSec === "number" ? ` · ${formatClock(r.durationSec)}` : ""}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {error && <div className="error">{error}</div>}
 
               <div className="workfm-upload-row">

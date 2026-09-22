@@ -114,3 +114,66 @@ export function parseArtistTitle(
   }
   return { artist: uploader?.trim() || "Unknown Artist", title: rawTitle.trim() };
 }
+
+export interface YouTubeSearchResult {
+  videoId: string;
+  title: string;
+  uploader: string | null;
+  durationSec?: number;
+  thumbnail?: string;
+}
+
+const MAX_SEARCH_RESULTS = 20; // sane upper bound regardless of what a caller asks for
+
+/**
+ * Runs a YouTube search via yt-dlp's `ytsearchN:` pseudo-URL and returns
+ * lightweight metadata (no download, no format resolution) for the WorkFM
+ * "search instead of pasting a link" UI. `--flat-playlist` keeps this fast —
+ * each result comes straight from the search results page rather than a
+ * full per-video fetch.
+ */
+export async function searchYouTube(query: string, limit = 8): Promise<YouTubeSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
+  const proc = Bun.spawn(
+    [
+      "yt-dlp",
+      ...YTDLP_COOKIE_ARGS,
+      ...YTDLP_EXTRA_ARGS,
+      `ytsearch${count}:${trimmed}`,
+      "--flat-playlist",
+      "--skip-download",
+      "-j",
+    ],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    drainText(proc.stderr),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`yt-dlp search failed${stderr ? `: ${stderr}` : ""}`);
+  }
+  const results: YouTubeSearchResult[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (typeof entry.id !== "string" || !VIDEO_ID_RE.test(entry.id)) continue;
+      const thumbnails = Array.isArray(entry.thumbnails) ? entry.thumbnails : [];
+      const thumbnail = thumbnails.length ? thumbnails[thumbnails.length - 1]?.url : undefined;
+      results.push({
+        videoId: entry.id,
+        title: typeof entry.title === "string" ? entry.title : "Untitled",
+        uploader: typeof entry.channel === "string" ? entry.channel : entry.uploader ?? null,
+        durationSec: typeof entry.duration === "number" ? entry.duration : undefined,
+        thumbnail,
+      });
+    } catch {
+      // skip malformed line — best-effort parsing of yt-dlp's JSON stream
+    }
+  }
+  return results;
+}

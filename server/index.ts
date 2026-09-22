@@ -10,6 +10,8 @@ import {
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
 import { getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
+import { searchYouTube } from "./lib/youtube";
+import { extractSpotifyTrackId, resolveSpotifyTrackQuery } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
@@ -267,6 +269,30 @@ const server = Bun.serve({
         return json(item, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to add to queue" }, { status: 400 });
+      }
+    }
+
+    const workfmRoomSearchMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/search$/);
+    if (workfmRoomSearchMatch && req.method === "GET") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomSearchMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const q = url.searchParams.get("q")?.trim() ?? "";
+      if (!q) return json({ results: [] });
+      try {
+        // A pasted Spotify track link can't be played directly (DRM), so
+        // resolve it to an "artist title" string first and search YouTube
+        // for that instead — same dropdown-of-results UX either way.
+        const spotifyTrackId = extractSpotifyTrackId(q);
+        const searchQuery = spotifyTrackId ? await resolveSpotifyTrackQuery(spotifyTrackId) : q;
+        if (spotifyTrackId && !searchQuery) {
+          return json({ error: "couldn't read that Spotify track — try pasting its name instead" }, { status: 400 });
+        }
+        const results = await searchYouTube(searchQuery!, 8);
+        return json({ results });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "search failed" }, { status: 500 });
       }
     }
 
