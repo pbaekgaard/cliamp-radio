@@ -19,6 +19,8 @@ export default function Dashboard() {
   const [announcementError, setAnnouncementError] = useState<string | null>(null);
   const [uploadingAnnouncement, setUploadingAnnouncement] = useState(false);
   const [uploadingAd, setUploadingAd] = useState(false);
+  const [addingAdFromYoutube, setAddingAdFromYoutube] = useState(false);
+  const [adYoutubeUrl, setAdYoutubeUrl] = useState("");
   const announcementFileInput = useRef<HTMLInputElement>(null);
   const adFileInput = useRef<HTMLInputElement>(null);
 
@@ -32,20 +34,34 @@ export default function Dashboard() {
     setAds(ads);
   }
 
-  async function uploadAnnouncementFile(category: "announcement" | "ad", input: HTMLInputElement | null) {
-    const file = input?.files?.[0];
+  async function uploadAnnouncementFile(category: "announcement" | "ad", file: File | null | undefined) {
     if (!file) return;
     setAnnouncementError(null);
     const setUploading = category === "ad" ? setUploadingAd : setUploadingAnnouncement;
     setUploading(true);
     try {
       await api.adminUploadAnnouncement(category, file);
-      if (input) input.value = "";
       await refreshAnnouncements();
     } catch (err) {
       setAnnouncementError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function addAdFromYoutube() {
+    const url = adYoutubeUrl.trim();
+    if (!url) return;
+    setAnnouncementError(null);
+    setAddingAdFromYoutube(true);
+    try {
+      await api.adminAddAnnouncementFromYoutube("ad", url);
+      setAdYoutubeUrl("");
+      await refreshAnnouncements();
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAddingAdFromYoutube(false);
     }
   }
 
@@ -202,11 +218,21 @@ export default function Dashboard() {
         <div className="announcement-section">
           <h3>Announcements</h3>
           <div className="header-actions">
-            <input ref={announcementFileInput} type="file" accept=".mp3,audio/mpeg" />
+            <input
+              ref={announcementFileInput}
+              type="file"
+              accept=".mp3,audio/mpeg"
+              className="visually-hidden-file-input"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                uploadAnnouncementFile("announcement", file);
+                e.target.value = ""; // allow re-selecting the same file to re-trigger onChange
+              }}
+            />
             <button
               className="btn-secondary"
               disabled={uploadingAnnouncement}
-              onClick={() => uploadAnnouncementFile("announcement", announcementFileInput.current)}
+              onClick={() => announcementFileInput.current?.click()}
             >
               {uploadingAnnouncement ? "Uploading…" : "Upload"}
             </button>
@@ -226,9 +252,29 @@ export default function Dashboard() {
         <div className="announcement-section">
           <h3>Ads</h3>
           <div className="header-actions">
-            <input ref={adFileInput} type="file" accept=".mp3,audio/mpeg" />
-            <button className="btn-secondary" disabled={uploadingAd} onClick={() => uploadAnnouncementFile("ad", adFileInput.current)}>
+            <input
+              ref={adFileInput}
+              type="file"
+              accept=".mp3,audio/mpeg"
+              className="visually-hidden-file-input"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                uploadAnnouncementFile("ad", file);
+                e.target.value = ""; // allow re-selecting the same file to re-trigger onChange
+              }}
+            />
+            <button className="btn-secondary" disabled={uploadingAd} onClick={() => adFileInput.current?.click()}>
               {uploadingAd ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+          <div className="header-actions announcement-youtube-row">
+            <input
+              placeholder="Or paste a YouTube link…"
+              value={adYoutubeUrl}
+              onChange={(e) => setAdYoutubeUrl(e.target.value)}
+            />
+            <button className="btn-secondary" disabled={addingAdFromYoutube || !adYoutubeUrl.trim()} onClick={addAdFromYoutube}>
+              {addingAdFromYoutube ? "Downloading…" : "Add from YouTube"}
             </button>
           </div>
           <ul className="announcement-file-list">

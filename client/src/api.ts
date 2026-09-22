@@ -349,6 +349,18 @@ export const api = {
     }
     return res.json() as Promise<WorkFmAnnouncementFile>;
   },
+  adminAddAnnouncementFromYoutube: async (category: "announcement" | "ad", youtubeUrl: string, title?: string) => {
+    const formData = new FormData();
+    formData.append("category", category);
+    formData.append("youtubeUrl", youtubeUrl.trim());
+    if (title?.trim()) formData.append("title", title.trim());
+    const res = await fetch("/api/admin/workfm/announcements", { method: "POST", credentials: "include", body: formData });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `Request failed: ${res.status}`);
+    }
+    return res.json() as Promise<WorkFmAnnouncementFile>;
+  },
   adminDeleteAnnouncement: (id: string) =>
     request(`/api/admin/workfm/announcements/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

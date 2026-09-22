@@ -747,6 +747,30 @@ input {
   padding: 16px 20px;
 }
 
+.announcement-youtube-row {
+  margin-top: 8px;
+}
+
+.announcement-youtube-row input {
+  flex: 1;
+}
+
+/* Keeps the native file <input> functional (so ref.current.click() still
+ * opens the OS file picker) while hiding its own default UI — the "Upload"
+ * button is what's actually shown/clicked; picking a file fires onChange
+ * and uploads immediately, no separate confirm step. */
+.visually-hidden-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .announcement-file-list {
   list-style: none;
   margin: 12px 0 0;

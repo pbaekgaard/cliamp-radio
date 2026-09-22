@@ -29,6 +29,7 @@ import {
   deleteAnnouncementFile,
   listAnnouncementFiles,
   saveAnnouncementFile,
+  saveAnnouncementFromYouTube,
   type AnnouncementCategory,
 } from "./lib/workfmAnnouncements";
 import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, prewarmAllPlaylistStreams, stopAllPlaylistStreams } from "./lib/playlistStream";
@@ -491,20 +492,28 @@ const server = Bun.serve({
     if (pathname === "/api/admin/workfm/announcements" && req.method === "POST") {
       if (!requireAuth(req)) return unauthorized();
       const formData = await req.formData().catch(() => null);
-      const file = formData?.get("file");
       const categoryRaw = formData?.get("category");
       const category: AnnouncementCategory | null =
         categoryRaw === "ad" ? "ad" : categoryRaw === "announcement" ? "announcement" : null;
-      if (!(file instanceof File) || !category) {
-        return json({ error: "an mp3 file and category ('announcement' or 'ad') are required" }, { status: 400 });
+      if (!category) {
+        return json({ error: "category ('announcement' or 'ad') is required" }, { status: 400 });
       }
       const titleRaw = formData?.get("title");
       const title = typeof titleRaw === "string" ? titleRaw : undefined;
+      const file = formData?.get("file");
+      const youtubeUrlRaw = formData?.get("youtubeUrl");
+      const youtubeUrl = typeof youtubeUrlRaw === "string" ? youtubeUrlRaw.trim() : "";
+      if (!(file instanceof File) && !youtubeUrl) {
+        return json({ error: "an mp3 file or a YouTube link is required" }, { status: 400 });
+      }
       try {
-        const entry = await saveAnnouncementFile(category, file, title);
+        const entry =
+          file instanceof File
+            ? await saveAnnouncementFile(category, file, title)
+            : await saveAnnouncementFromYouTube(category, youtubeUrl, title);
         return json(entry, { status: 201 });
       } catch (err) {
-        return json({ error: err instanceof Error ? err.message : "failed to upload" }, { status: 400 });
+        return json({ error: err instanceof Error ? err.message : "failed to add" }, { status: 400 });
       }
     }
 
