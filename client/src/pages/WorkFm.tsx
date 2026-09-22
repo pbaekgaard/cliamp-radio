@@ -853,16 +853,20 @@ function RoomPage({ slug }: { slug: string }) {
           <div className="workfm-now-playing">
             <p className="workfm-now-playing-label">Now playing</p>
             {state.nowPlaying ? (
-              <div className="workfm-now-playing-card">
+              <div className={`workfm-now-playing-card${state.nowPlaying.special ? " workfm-now-playing-special" : ""}`}>
                 <div>
                   <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
-                  <div className="muted">{state.nowPlaying.artist}</div>
-                  <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
-                  <div className="muted">
-                    requested by <strong>{state.nowPlaying.addedBy}</strong>
-                  </div>
+                  {!state.nowPlaying.special && (
+                    <>
+                      <div className="muted">{state.nowPlaying.artist}</div>
+                      <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
+                      <div className="muted">
+                        requested by <strong>{state.nowPlaying.addedBy}</strong>
+                      </div>
+                    </>
+                  )}
                 </div>
-                {name && (
+                {name && !state.nowPlaying.special && (
                   <div className="workfm-now-playing-actions">
                     <button
                       className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
@@ -899,7 +903,7 @@ function RoomPage({ slug }: { slug: string }) {
             ) : (
               <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
             )}
-            {name && state.nowPlaying && state.repeatVote.armed && (
+            {name && state.nowPlaying && !state.nowPlaying.special && state.repeatVote.armed && (
               <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
             )}
           </div>

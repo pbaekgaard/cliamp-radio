@@ -109,6 +109,11 @@ export interface WorkFmQueueItem {
   /** "Vote next" tally for this queued item — only meaningful for entries
    * still in `queue` (moving the currently-playing track doesn't apply). */
   nextVote?: WorkFmNextVoteState;
+  /** Set when this is a scheduled announcement or ad-break "track" rather
+   * than a real song — see server/lib/workfmAnnouncements.ts. Unskippable;
+   * clients should hide the progress bar and requested-by/like/vote
+   * controls and just show `title` ("ANNOUNCEMENT"/"ADVERTISEMENT"). */
+  special?: "announcement" | "ad";
 }
 
 export interface WorkFmChatMessage {
@@ -226,6 +231,14 @@ export interface WorkFmLibraryTrack {
 
 export type WorkFmLibraryView = "history" | "most-liked" | "saved";
 
+export interface WorkFmAnnouncementFile {
+  id: string;
+  category: "announcement" | "ad";
+  title: string;
+  filename: string;
+  uploadedAt: number;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -320,4 +333,22 @@ export const api = {
   workfmLibrary: (view: WorkFmLibraryView = "history") => request<WorkFmLibraryTrack[]>(`/api/workfm/library?view=${view}`),
   workfmToggleLike: (id: string) =>
     request<{ likes: number; liked: boolean }>(`/api/workfm/library/${encodeURIComponent(id)}/like`, { method: "POST" }),
+
+  // --- WorkFM announcements/ads (admin) ---
+  adminListAnnouncements: () =>
+    request<{ announcements: WorkFmAnnouncementFile[]; ads: WorkFmAnnouncementFile[] }>("/api/admin/workfm/announcements"),
+  adminUploadAnnouncement: async (category: "announcement" | "ad", file: File, title?: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("category", category);
+    if (title?.trim()) formData.append("title", title.trim());
+    const res = await fetch("/api/admin/workfm/announcements", { method: "POST", credentials: "include", body: formData });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `Request failed: ${res.status}`);
+    }
+    return res.json() as Promise<WorkFmAnnouncementFile>;
+  },
+  adminDeleteAnnouncement: (id: string) =>
+    request(`/api/admin/workfm/announcements/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

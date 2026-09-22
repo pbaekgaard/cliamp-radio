@@ -4,6 +4,12 @@ import path from "node:path";
 import { relayPaced } from "./audioRelay";
 import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
+import {
+  announcementFilePath,
+  pickRandomAnnouncementFiles,
+  type AnnouncementCategory,
+  type AnnouncementFile,
+} from "./workfmAnnouncements";
 
 // ---------------------------------------------------------------------------
 // WorkFM: an always-on radio queue engine with two queues layered on top of
@@ -62,6 +68,16 @@ const PRESENCE_TIMEOUT_MS = 10 * 1000;
 const AUTO_DJ_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 // How often the idle sleep loop checks whether someone's shown up again.
 const IDLE_POLL_INTERVAL_MS = 3 * 1000;
+// How often (in ms of *actual playback time* — see msSincePlayClockStart())
+// an announcement plays solo, and an ad break of AD_BREAK_FILE_COUNT ad
+// files plays back-to-back — both inserted right after the currently
+// playing track finishes naturally (see loop()'s maybeInsertSpecials()).
+// Deliberately measured against playback time rather than wall-clock time,
+// so a room that's been asleep (see sleepUntilNotIdle()) doesn't come back
+// owing a pile of "overdue" announcements/ads.
+const ANNOUNCEMENT_INTERVAL_MS = 30 * 60 * 1000;
+const AD_BREAK_INTERVAL_MS = 60 * 60 * 1000;
+const AD_BREAK_FILE_COUNT = 2;
 // A "listener" is someone whose browser currently has an open connection to
 // the actual audio stream (i.e. they clicked "Listen live" and are still
 // playing it, or are tuned in via cliamp) — see subscribe() below. Merely
@@ -102,6 +118,15 @@ export interface QueueItem {
    * such items never sit in the visible request queue, only ever exist as
    * `this.current` while playing. Left undefined for real requests. */
   isAutoDj?: boolean;
+  /** Set when this is a scheduled announcement or ad-break "track" (see
+   * workfmAnnouncements.ts + loop()'s maybeInsertSpecials()/playSpecial())
+   * — an admin-uploaded mp3 played automatically between real tracks.
+   * Never sits in the visible request queue, only ever exists as
+   * `this.current` while playing. Unskippable/un-repeatable (see
+   * requestSkip/requestRepeat) and rendered without a progress bar or
+   * requested-by/like/vote controls client-side (see WorkFm.tsx) — just
+   * the fixed "ANNOUNCEMENT"/"ADVERTISEMENT" label in `title`. */
+  special?: AnnouncementCategory;
 }
 
 interface ChatMessage {
@@ -241,6 +266,36 @@ class WorkFmQueueStream {
   // or null while someone's present. Starts "empty" at construction —
   // workfmRooms.ts uses this to auto-remove rooms nobody's actually using.
   private _emptySince: number | null = Date.now();
+  // --- Announcement/ad scheduling clock ---
+  // Accumulated ms of actual playback activity, paused whenever the room's
+  // asleep (see sleepUntilNotIdle()) — see msSincePlayClockStart() below.
+  private accumulatedPlayMs = 0;
+  // Date.now() the clock was last (re)started, or null while paused.
+  private playClockResumedAt: number | null = null;
+  // msSincePlayClockStart() value the last time an announcement/ad break
+  // played — compared against ANNOUNCEMENT_INTERVAL_MS/AD_BREAK_INTERVAL_MS
+  // in loop()'s maybeInsertSpecials().
+  private lastAnnouncementAtMs = 0;
+  private lastAdBreakAtMs = 0;
+
+  /** Total ms of actual playback activity since this room was created,
+   * excluding any stretches spent asleep (idle, no listeners — see
+   * sleepUntilNotIdle()). This is the clock ANNOUNCEMENT_INTERVAL_MS/
+   * AD_BREAK_INTERVAL_MS are measured against. */
+  private msSincePlayClockStart(): number {
+    return this.accumulatedPlayMs + (this.playClockResumedAt !== null ? Date.now() - this.playClockResumedAt : 0);
+  }
+
+  private pausePlayClock() {
+    if (this.playClockResumedAt !== null) {
+      this.accumulatedPlayMs += Date.now() - this.playClockResumedAt;
+      this.playClockResumedAt = null;
+    }
+  }
+
+  private resumePlayClock() {
+    if (this.playClockResumedAt === null) this.playClockResumedAt = Date.now();
+  }
 
   get status() {
     return {
@@ -467,6 +522,7 @@ class WorkFmQueueStream {
   start() {
     if (this.started) return;
     this.started = true;
+    this.resumePlayClock();
     this.loop().catch((err) => console.error("[workfm-queue] loop crashed:", err));
   }
 
@@ -721,6 +777,7 @@ class WorkFmQueueStream {
     hasVoted?: boolean;
   } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
+    if (this.current.special) return { ok: false, error: "this can't be skipped" };
     const name = requestedBy.toLowerCase();
 
     // Toggle: voting again removes your vote, in case you change your mind.
@@ -758,6 +815,7 @@ class WorkFmQueueStream {
     hasVoted?: boolean;
   } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
+    if (this.current.special) return { ok: false, error: "this can't be repeated" };
     const name = requestedBy.toLowerCase();
 
     // Toggle: voting again removes your vote, in case you change your mind.
@@ -865,9 +923,11 @@ class WorkFmQueueStream {
     this.current = null;
     this.currentStartedAt = null;
     this.currentMetaString = "Radio Bækgaard - auto-DJ resting (no listeners)";
+    this.pausePlayClock();
     while (this.currentGen === gen && this.queue.length === 0 && this.emptySince !== null) {
       await Bun.sleep(IDLE_POLL_INTERVAL_MS);
     }
+    this.resumePlayClock();
   }
 
   private async loop() {
@@ -946,6 +1006,64 @@ class WorkFmQueueStream {
         // workfmLibrary's saved-uploads store at upload time (see
         // addUploadToQueue), so nothing else needs to happen here.
         this.cleanupUpload(item.id).catch(() => {});
+      }
+      await this.maybeInsertSpecials();
+    }
+  }
+
+  /**
+   * Called at every real track boundary (right after one finishes, whether
+   * played fully or skipped) — inserts a scheduled ad break and/or
+   * announcement if either is due (see ANNOUNCEMENT_INTERVAL_MS/
+   * AD_BREAK_INTERVAL_MS), ad break first per the requested ordering ("play
+   * ad break, then finish with announcement"). A no-op if no files have
+   * been uploaded for a due category yet (see workfmAnnouncements.ts).
+   */
+  private async maybeInsertSpecials(): Promise<void> {
+    if (this.msSincePlayClockStart() - this.lastAdBreakAtMs >= AD_BREAK_INTERVAL_MS) {
+      this.lastAdBreakAtMs = this.msSincePlayClockStart();
+      const entries = await pickRandomAnnouncementFiles("ad", AD_BREAK_FILE_COUNT);
+      if (entries.length > 0) await this.playSpecial("ad", entries, "ADVERTISEMENT");
+    }
+    if (this.msSincePlayClockStart() - this.lastAnnouncementAtMs >= ANNOUNCEMENT_INTERVAL_MS) {
+      this.lastAnnouncementAtMs = this.msSincePlayClockStart();
+      const entries = await pickRandomAnnouncementFiles("announcement", 1);
+      if (entries.length > 0) await this.playSpecial("announcement", entries, "ANNOUNCEMENT");
+    }
+  }
+
+  /**
+   * Plays one or more admin-uploaded mp3 files back-to-back as a single
+   * "special" broadcast segment (an announcement or an ad break) —
+   * unskippable/un-repeatable (see requestSkip/requestRepeat) and shown to
+   * listeners as `label` instead of a real track/artist, with no progress
+   * bar or requested-by/like/vote controls (see QueueItem.special +
+   * WorkFm.tsx). Reuses playUpload() for the actual local-file playback,
+   * same as any other uploaded mp3.
+   */
+  private async playSpecial(category: AnnouncementCategory, entries: AnnouncementFile[], label: string): Promise<void> {
+    for (const entry of entries) {
+      const item: QueueItem = {
+        id: this.nextId++,
+        videoId: "",
+        url: "",
+        artist: "",
+        title: label,
+        addedBy: "Radio Bækgaard",
+        addedAt: Date.now(),
+        source: "upload",
+        libraryId: `${category}:${entry.id}`,
+        diskPath: announcementFilePath(entry),
+        special: category,
+      };
+      this.current = item;
+      this.currentMetaString = label;
+      this.currentStartedAt = Date.now();
+      const gen = ++this.currentGen;
+      try {
+        await this.playUpload(item, gen);
+      } catch (err) {
+        console.error(`[workfm-queue] failed to play ${category} "${entry.title}":`, err);
       }
     }
   }

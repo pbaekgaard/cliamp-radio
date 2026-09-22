@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Station, type Track } from "../api";
+import { api, type Station, type Track, type WorkFmAnnouncementFile } from "../api";
 import { useAuth } from "../AuthContext";
 import { useUpdate } from "../UpdateContext";
 
@@ -14,9 +14,50 @@ export default function Dashboard() {
   const [draft, setDraft] = useState(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [announcements, setAnnouncements] = useState<WorkFmAnnouncementFile[]>([]);
+  const [ads, setAds] = useState<WorkFmAnnouncementFile[]>([]);
+  const [announcementError, setAnnouncementError] = useState<string | null>(null);
+  const [uploadingAnnouncement, setUploadingAnnouncement] = useState(false);
+  const [uploadingAd, setUploadingAd] = useState(false);
+  const announcementFileInput = useRef<HTMLInputElement>(null);
+  const adFileInput = useRef<HTMLInputElement>(null);
 
   async function refresh() {
     setStations(await api.listStations());
+  }
+
+  async function refreshAnnouncements() {
+    const { announcements, ads } = await api.adminListAnnouncements();
+    setAnnouncements(announcements);
+    setAds(ads);
+  }
+
+  async function uploadAnnouncementFile(category: "announcement" | "ad", input: HTMLInputElement | null) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    setAnnouncementError(null);
+    const setUploading = category === "ad" ? setUploadingAd : setUploadingAnnouncement;
+    setUploading(true);
+    try {
+      await api.adminUploadAnnouncement(category, file);
+      if (input) input.value = "";
+      await refreshAnnouncements();
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeAnnouncementFile(id: string) {
+    if (!confirm("Delete this file?")) return;
+    setAnnouncementError(null);
+    try {
+      await api.adminDeleteAnnouncement(id);
+      await refreshAnnouncements();
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function checkUpdatesNow() {
@@ -37,6 +78,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     refresh();
+    refreshAnnouncements();
   }, []);
 
   function startNew() {
@@ -148,6 +190,59 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <h2 className="dashboard-section-title">WorkFM: Announcements &amp; Ads</h2>
+      <p className="muted">
+        Announcements play solo every 30 minutes of playback; ad breaks play 2 random ads back-to-back every hour.
+        Both are unskippable and shown to listeners as "ANNOUNCEMENT"/"ADVERTISEMENT".
+      </p>
+      {announcementError && <div className="error">{announcementError}</div>}
+      <div className="announcement-sections">
+        <div className="announcement-section">
+          <h3>Announcements</h3>
+          <div className="header-actions">
+            <input ref={announcementFileInput} type="file" accept=".mp3,audio/mpeg" />
+            <button
+              className="btn-secondary"
+              disabled={uploadingAnnouncement}
+              onClick={() => uploadAnnouncementFile("announcement", announcementFileInput.current)}
+            >
+              {uploadingAnnouncement ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+          <ul className="announcement-file-list">
+            {announcements.length === 0 && <li className="muted">No announcement files uploaded yet.</li>}
+            {announcements.map((a) => (
+              <li key={a.id}>
+                <span>{a.title}</span>
+                <button className="btn-danger" onClick={() => removeAnnouncementFile(a.id)}>
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="announcement-section">
+          <h3>Ads</h3>
+          <div className="header-actions">
+            <input ref={adFileInput} type="file" accept=".mp3,audio/mpeg" />
+            <button className="btn-secondary" disabled={uploadingAd} onClick={() => uploadAnnouncementFile("ad", adFileInput.current)}>
+              {uploadingAd ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+          <ul className="announcement-file-list">
+            {ads.length === 0 && <li className="muted">No ad files uploaded yet.</li>}
+            {ads.map((a) => (
+              <li key={a.id}>
+                <span>{a.title}</span>
+                <button className="btn-danger" onClick={() => removeAnnouncementFile(a.id)}>
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
 
       {editingSlug && (

@@ -25,6 +25,12 @@ import {
   slugify,
   type Station,
 } from "./lib/stations";
+import {
+  deleteAnnouncementFile,
+  listAnnouncementFiles,
+  saveAnnouncementFile,
+  type AnnouncementCategory,
+} from "./lib/workfmAnnouncements";
 import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, prewarmAllPlaylistStreams, stopAllPlaylistStreams } from "./lib/playlistStream";
 
 const PORT = Number(process.env.PORT || 8000);
@@ -468,6 +474,45 @@ const server = Bun.serve({
         const ok = await deleteStation(slug);
         return ok ? json({ ok: true }) : json({ error: "not found" }, { status: 404 });
       }
+    }
+
+    // --- WorkFM announcements/ads (admin-only management of the mp3 files
+    // WorkFm's auto-DJ automatically weaves in between tracks — see
+    // lib/workfmAnnouncements.ts + workfmQueue.ts's maybeInsertSpecials()) ---
+    if (pathname === "/api/admin/workfm/announcements" && req.method === "GET") {
+      if (!requireAuth(req)) return unauthorized();
+      const [announcements, ads] = await Promise.all([
+        listAnnouncementFiles("announcement"),
+        listAnnouncementFiles("ad"),
+      ]);
+      return json({ announcements, ads });
+    }
+
+    if (pathname === "/api/admin/workfm/announcements" && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const formData = await req.formData().catch(() => null);
+      const file = formData?.get("file");
+      const categoryRaw = formData?.get("category");
+      const category: AnnouncementCategory | null =
+        categoryRaw === "ad" ? "ad" : categoryRaw === "announcement" ? "announcement" : null;
+      if (!(file instanceof File) || !category) {
+        return json({ error: "an mp3 file and category ('announcement' or 'ad') are required" }, { status: 400 });
+      }
+      const titleRaw = formData?.get("title");
+      const title = typeof titleRaw === "string" ? titleRaw : undefined;
+      try {
+        const entry = await saveAnnouncementFile(category, file, title);
+        return json(entry, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to upload" }, { status: 400 });
+      }
+    }
+
+    const announcementMatch = pathname.match(/^\/api\/admin\/workfm\/announcements\/([^/]+)$/);
+    if (announcementMatch && req.method === "DELETE") {
+      if (!requireAuth(req)) return unauthorized();
+      const ok = await deleteAnnouncementFile(decodeURIComponent(announcementMatch[1]!));
+      return ok ? json({ ok: true }) : json({ error: "not found" }, { status: 404 });
     }
 
     // --- Listeners (for the globe) ---
