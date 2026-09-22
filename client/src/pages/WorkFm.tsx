@@ -14,6 +14,7 @@ import {
 import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
+import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
 
 function timeAgo(ts: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -651,6 +652,10 @@ function RoomPage({ slug }: { slug: string }) {
   const { nowPlaying, toggle, play, stop } = useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
   const playing = nowPlaying?.url === streamUrl;
+  // Lags behind state.nowPlaying until it's actually about to be audible —
+  // see useSyncedNowPlaying's comment. Used for the "now playing" card
+  // instead of state.nowPlaying directly.
+  const displayedNowPlaying = useSyncedNowPlaying(state.nowPlaying, playing, streamUrl);
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -778,9 +783,9 @@ function RoomPage({ slug }: { slug: string }) {
   }
 
   async function likeNowPlaying() {
-    if (!state.nowPlaying) return;
+    if (!displayedNowPlaying) return;
     try {
-      await api.workfmToggleLike(state.nowPlaying.libraryId);
+      await api.workfmToggleLike(displayedNowPlaying.libraryId);
       poll();
     } catch {
       // ignore — poll() will resync
@@ -852,28 +857,28 @@ function RoomPage({ slug }: { slug: string }) {
         <div className="workfm-main">
           <div className="workfm-now-playing">
             <p className="workfm-now-playing-label">Now playing</p>
-            {state.nowPlaying ? (
-              <div className={`workfm-now-playing-card${state.nowPlaying.special ? " workfm-now-playing-special" : ""}`}>
+            {displayedNowPlaying ? (
+              <div className={`workfm-now-playing-card${displayedNowPlaying.special ? " workfm-now-playing-special" : ""}`}>
                 <div>
-                  <div className="workfm-now-playing-title">{state.nowPlaying.title}</div>
-                  {!state.nowPlaying.special && (
+                  <div className="workfm-now-playing-title">{displayedNowPlaying.title}</div>
+                  {!displayedNowPlaying.special && (
                     <>
-                      <div className="muted">{state.nowPlaying.artist}</div>
-                      <NowPlayingClock startedAt={state.nowPlaying.startedAt} durationSec={state.nowPlaying.durationSec} />
+                      <div className="muted">{displayedNowPlaying.artist}</div>
+                      <NowPlayingClock startedAt={displayedNowPlaying.startedAt} durationSec={displayedNowPlaying.durationSec} />
                       <div className="muted">
-                        requested by <strong>{state.nowPlaying.addedBy}</strong>
+                        requested by <strong>{displayedNowPlaying.addedBy}</strong>
                       </div>
                     </>
                   )}
                 </div>
-                {name && !state.nowPlaying.special && (
+                {name && !displayedNowPlaying.special && (
                   <div className="workfm-now-playing-actions">
                     <button
-                      className={`btn-secondary${state.nowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
+                      className={`btn-secondary${displayedNowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
                       onClick={likeNowPlaying}
                       title="Like this song"
                     >
-                      ♥ {state.nowPlaying.likes}
+                      ♥ {displayedNowPlaying.likes}
                     </button>
                     <button
                       className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
@@ -899,7 +904,7 @@ function RoomPage({ slug }: { slug: string }) {
                     </button>
                   </div>
                 )}
-                {name && state.nowPlaying.special === "ad" && (
+                {name && displayedNowPlaying.special === "ad" && (
                   <div className="workfm-now-playing-actions">
                     <button
                       className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
@@ -918,7 +923,7 @@ function RoomPage({ slug }: { slug: string }) {
             ) : (
               <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
             )}
-            {name && state.nowPlaying && !state.nowPlaying.special && state.repeatVote.armed && (
+            {name && displayedNowPlaying && !displayedNowPlaying.special && state.repeatVote.armed && (
               <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
             )}
           </div>

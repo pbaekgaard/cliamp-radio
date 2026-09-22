@@ -24,6 +24,13 @@ interface RadioPlayerState {
   /** 0–1, local to this browser only — doesn't affect anyone else listening. */
   volume: number;
   setVolume: (volume: number) => void;
+  /** The single shared `<audio>` element, or null before mount — read-only
+   * escape hatch for callers (see useIcyTitleTimeline) that need to read
+   * `.currentTime`/listen for `timeupdate` to line up something (e.g. a
+   * "now playing" label) with what's actually audible right now, instead
+   * of whatever the stream's playhead nominally reports server-side. Not
+   * meant for controlling playback directly — use play()/toggle()/stop(). */
+  getAudioElement: () => HTMLAudioElement | null;
 }
 
 const RadioPlayerContext = createContext<RadioPlayerState | null>(null);
@@ -188,8 +195,12 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  function getAudioElement() {
+    return audioRef.current;
+  }
+
   return (
-    <RadioPlayerContext.Provider value={{ nowPlaying, toggle, play, stop, volume, setVolume }}>
+    <RadioPlayerContext.Provider value={{ nowPlaying, toggle, play, stop, volume, setVolume, getAudioElement }}>
       {children}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <audio
