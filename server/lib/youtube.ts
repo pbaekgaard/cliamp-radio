@@ -136,7 +136,7 @@ export async function searchYouTube(query: string, limit = 8): Promise<YouTubeSe
   const trimmed = query.trim();
   if (!trimmed) return [];
   const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
-  return runYtDlpSearch([`ytsearch${count}:${trimmed}`]);
+  return runYtDlpSearch([`ytsearch${count}:${trimmed}`], { flat: true });
 }
 
 /**
@@ -146,19 +146,32 @@ export async function searchYouTube(query: string, limit = 8): Promise<YouTubeSe
  * audio rather than whatever video (lyric videos, covers, reactions, live
  * performances, ...) a plain YouTube search might surface first.
  * `--playlist-items 1-N` caps how many of YT Music's (often hundreds of)
- * search results yt-dlp has to paginate through, keeping this fast.
+ * search results yt-dlp has to paginate through, keeping this fast. This
+ * intentionally skips `--flat-playlist`: YT Music's flat search results
+ * only expose the *channel* name (often just "Daft Punk" as a single
+ * uploader, or missing entirely), not the real per-track artist credit —
+ * fetching full metadata per result is slower but is the only way to get
+ * the actual "artist" field instead of "Unknown".
  */
 export async function searchYouTubeMusic(query: string, limit = 8): Promise<YouTubeSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
   const searchUrl = `https://music.youtube.com/search?q=${encodeURIComponent(trimmed)}#Songs`;
-  return runYtDlpSearch([searchUrl, "--playlist-items", `1-${count}`]);
+  return runYtDlpSearch([searchUrl, "--playlist-items", `1-${count}`], { flat: false });
 }
 
-async function runYtDlpSearch(targetArgs: string[]): Promise<YouTubeSearchResult[]> {
+async function runYtDlpSearch(targetArgs: string[], opts: { flat: boolean }): Promise<YouTubeSearchResult[]> {
   const proc = Bun.spawn(
-    ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, ...targetArgs, "--flat-playlist", "--skip-download", "-j"],
+    [
+      "yt-dlp",
+      ...YTDLP_COOKIE_ARGS,
+      ...YTDLP_EXTRA_ARGS,
+      ...targetArgs,
+      ...(opts.flat ? ["--flat-playlist"] : []),
+      "--skip-download",
+      "-j",
+    ],
     { stdout: "pipe", stderr: "pipe" }
   );
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -177,10 +190,20 @@ async function runYtDlpSearch(targetArgs: string[]): Promise<YouTubeSearchResult
       if (typeof entry.id !== "string" || !VIDEO_ID_RE.test(entry.id)) continue;
       const thumbnails = Array.isArray(entry.thumbnails) ? entry.thumbnails : [];
       const thumbnail = thumbnails.length ? thumbnails[thumbnails.length - 1]?.url : undefined;
+      // Full (non-flat) metadata carries the real artist credit as
+      // "artist" (e.g. "Daft Punk, Pharrell Williams"), which is what we
+      // want for YT Music results — flat results only have "channel"/
+      // "uploader", which is often just the primary artist's channel name.
+      const uploader =
+        typeof entry.artist === "string"
+          ? entry.artist
+          : typeof entry.channel === "string"
+            ? entry.channel
+            : entry.uploader ?? null;
       results.push({
         videoId: entry.id,
         title: typeof entry.title === "string" ? entry.title : "Untitled",
-        uploader: typeof entry.channel === "string" ? entry.channel : entry.uploader ?? null,
+        uploader,
         durationSec: typeof entry.duration === "number" ? entry.duration : undefined,
         thumbnail,
       });
