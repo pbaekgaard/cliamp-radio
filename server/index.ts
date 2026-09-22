@@ -12,7 +12,7 @@ import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, nor
 import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
 import { drainText, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
-import { extractSpotifyTrackId, resolveSpotifyTrackQuery } from "./lib/spotify";
+import { extractSpotifyTrackId, resolveSpotifyTrack } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
@@ -299,20 +299,24 @@ const server = Bun.serve({
       if (!q) return json({ results: [] });
       try {
         // A pasted Spotify track link can't be played directly (DRM), so
-        // resolve it to an "artist title" string first and search for that
+        // resolve it to its real title/artist(s) first and search for that
         // instead — same dropdown-of-results UX either way. For Spotify
         // links specifically we search YouTube *Music*'s "Songs" section
         // rather than plain YouTube video search, since we already know
         // we want the official song audio (not lyric videos, covers,
         // reactions, live performances, etc. that a general search surfaces).
         const spotifyTrackId = extractSpotifyTrackId(q);
-        const searchQuery = spotifyTrackId ? await resolveSpotifyTrackQuery(spotifyTrackId) : q;
-        if (spotifyTrackId && !searchQuery) {
+        const spotifyTrack = spotifyTrackId ? await resolveSpotifyTrack(spotifyTrackId) : null;
+        if (spotifyTrackId && !spotifyTrack) {
           return json({ error: "couldn't read that Spotify track — try pasting its name instead" }, { status: 400 });
         }
-        const results = spotifyTrackId
-          ? await searchYouTubeMusic(searchQuery!, 8)
-          : await searchYouTube(searchQuery!, 8);
+        const results = spotifyTrack
+          ? // Uses `--flat-playlist` under the hood for speed, which only
+            // exposes the YouTube *channel* name, not the real per-track
+            // artist credit — override it with the artist(s) Spotify itself
+            // reported, which we already know are correct.
+            (await searchYouTubeMusic(spotifyTrack.query, 8)).map((r) => ({ ...r, uploader: spotifyTrack.artists }))
+          : await searchYouTube(q, 8);
         return json({ results });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "search failed" }, { status: 500 });

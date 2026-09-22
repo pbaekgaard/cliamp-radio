@@ -146,19 +146,18 @@ export async function searchYouTube(query: string, limit = 8): Promise<YouTubeSe
  * audio rather than whatever video (lyric videos, covers, reactions, live
  * performances, ...) a plain YouTube search might surface first.
  * `--playlist-items 1-N` caps how many of YT Music's (often hundreds of)
- * search results yt-dlp has to paginate through, keeping this fast. This
- * intentionally skips `--flat-playlist`: YT Music's flat search results
- * only expose the *channel* name (often just "Daft Punk" as a single
- * uploader, or missing entirely), not the real per-track artist credit —
- * fetching full metadata per result is slower but is the only way to get
- * the actual "artist" field instead of "Unknown".
+ * search results yt-dlp has to paginate through, keeping this fast. Uses
+ * `--flat-playlist` for speed — flat results only expose the *channel*
+ * name (not the real per-track artist credit), so callers with a known
+ * artist (e.g. resolved from the source Spotify link) should override the
+ * `uploader` field on the results themselves rather than trusting this.
  */
 export async function searchYouTubeMusic(query: string, limit = 8): Promise<YouTubeSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
   const searchUrl = `https://music.youtube.com/search?q=${encodeURIComponent(trimmed)}#Songs`;
-  return runYtDlpSearch([searchUrl, "--playlist-items", `1-${count}`], { flat: false });
+  return runYtDlpSearch([searchUrl, "--playlist-items", `1-${count}`], { flat: true });
 }
 
 async function runYtDlpSearch(targetArgs: string[], opts: { flat: boolean }): Promise<YouTubeSearchResult[]> {
