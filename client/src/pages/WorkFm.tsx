@@ -899,6 +899,21 @@ function RoomPage({ slug }: { slug: string }) {
                     </button>
                   </div>
                 )}
+                {name && state.nowPlaying.special === "ad" && (
+                  <div className="workfm-now-playing-actions">
+                    <button
+                      className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
+                      onClick={skip}
+                      title={
+                        state.skipVote.hasVoted
+                          ? `Voted to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
+                          : `Vote to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
+                      }
+                    >
+                      <SkipIcon /> Skip ads {state.skipVote.votes}/{state.skipVote.total}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>

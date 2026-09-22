@@ -189,6 +189,24 @@ export function getLibraryTrack(id: string): LibraryTrack | null {
   return library.get(id) ?? null;
 }
 
+/** Admin-only: permanently removes a track from the library (History/Most
+ * liked/Most played/Saved uploads) and best-effort deletes its saved file
+ * from disk if it still has one. Returns false if `id` isn't in the
+ * library. Does not affect anything currently queued/playing elsewhere —
+ * it's just the persisted record of what's been played. */
+export async function deleteLibraryEntry(id: string): Promise<boolean> {
+  const entry = library.get(id);
+  if (!entry) return false;
+  if (entry.savedFilePath) {
+    await rm(entry.savedFilePath, { force: true }).catch((err) =>
+      console.error(`[workfm-library] failed to delete saved file for ${id}:`, err)
+    );
+  }
+  library.delete(id);
+  await save();
+  return true;
+}
+
 /** Library ids of every track that's actually been played at least once and
  * is still playable right now (YouTube is always assumed playable; an
  * upload only counts while its file is still saved on disk) — this is the

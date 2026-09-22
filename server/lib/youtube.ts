@@ -136,16 +136,29 @@ export async function searchYouTube(query: string, limit = 8): Promise<YouTubeSe
   const trimmed = query.trim();
   if (!trimmed) return [];
   const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
+  return runYtDlpSearch([`ytsearch${count}:${trimmed}`]);
+}
+
+/**
+ * Same idea as `searchYouTube`, but searches YouTube *Music*'s "Songs"
+ * section instead of general YouTube video search. This is used for
+ * Spotify-link lookups, where we already know we want the official song
+ * audio rather than whatever video (lyric videos, covers, reactions, live
+ * performances, ...) a plain YouTube search might surface first.
+ * `--playlist-items 1-N` caps how many of YT Music's (often hundreds of)
+ * search results yt-dlp has to paginate through, keeping this fast.
+ */
+export async function searchYouTubeMusic(query: string, limit = 8): Promise<YouTubeSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const count = Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS));
+  const searchUrl = `https://music.youtube.com/search?q=${encodeURIComponent(trimmed)}#Songs`;
+  return runYtDlpSearch([searchUrl, "--playlist-items", `1-${count}`]);
+}
+
+async function runYtDlpSearch(targetArgs: string[]): Promise<YouTubeSearchResult[]> {
   const proc = Bun.spawn(
-    [
-      "yt-dlp",
-      ...YTDLP_COOKIE_ARGS,
-      ...YTDLP_EXTRA_ARGS,
-      `ytsearch${count}:${trimmed}`,
-      "--flat-playlist",
-      "--skip-download",
-      "-j",
-    ],
+    ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, ...targetArgs, "--flat-playlist", "--skip-download", "-j"],
     { stdout: "pipe", stderr: "pipe" }
   );
   const [stdout, stderr, exitCode] = await Promise.all([

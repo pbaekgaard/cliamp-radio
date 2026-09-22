@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { drainText, extractYouTubeVideoId, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 
@@ -150,6 +150,38 @@ export async function saveAnnouncementFromYouTube(
     id,
     category,
     title: title?.trim() || rawTitle?.trim() || (category === "ad" ? "Advertisement" : "Announcement"),
+    filename,
+    uploadedAt: Date.now(),
+  };
+
+  const all = await readIndex();
+  all.push(entry);
+  await writeIndex(all);
+  return entry;
+}
+
+/**
+ * Copies an existing on-disk mp3 (e.g. a WorkFM upload's still-saved file —
+ * see workfmLibrary.ts's savedFilePath) into DATA_DIR as a new announcement/
+ * ad entry, without re-encoding or re-downloading anything. Used by the
+ * admin dashboard's "Mark as ad"/"Mark as announcement" actions on a
+ * History entry, so a track that's already been uploaded once doesn't need
+ * to be re-uploaded just to promote it.
+ */
+export async function saveAnnouncementFromDisk(
+  category: AnnouncementCategory,
+  sourceFilePath: string,
+  title?: string
+): Promise<AnnouncementFile> {
+  await ensureDir();
+  const id = crypto.randomUUID();
+  const filename = `${id}.mp3`;
+  await copyFile(sourceFilePath, path.join(DATA_DIR, filename));
+
+  const entry: AnnouncementFile = {
+    id,
+    category,
+    title: title?.trim() || (category === "ad" ? "Advertisement" : "Announcement"),
     filename,
     uploadedAt: Date.now(),
   };

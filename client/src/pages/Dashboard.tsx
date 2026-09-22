@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Station, type Track, type WorkFmAnnouncementFile } from "../api";
+import { api, type Station, type Track, type WorkFmAnnouncementFile, type WorkFmLibraryTrack } from "../api";
 import { useAuth } from "../AuthContext";
 import { useUpdate } from "../UpdateContext";
 
@@ -24,6 +24,11 @@ export default function Dashboard() {
   const [forcingAd, setForcingAd] = useState(false);
   const [forcingAnnouncement, setForcingAnnouncement] = useState(false);
   const [forceMessage, setForceMessage] = useState<string | null>(null);
+  const [history, setHistory] = useState<WorkFmLibraryTrack[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [confirmDeleteHistory, setConfirmDeleteHistory] = useState<WorkFmLibraryTrack | null>(null);
+  const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  const [promotingHistoryId, setPromotingHistoryId] = useState<string | null>(null);
   const announcementFileInput = useRef<HTMLInputElement>(null);
   const adFileInput = useRef<HTMLInputElement>(null);
 
@@ -121,9 +126,43 @@ export default function Dashboard() {
     }
   }
 
+  async function refreshHistory() {
+    setHistory(await api.adminListHistory());
+  }
+
+  async function promoteHistoryEntry(id: string, category: "announcement" | "ad") {
+    setHistoryError(null);
+    setPromotingHistoryId(id);
+    try {
+      await api.adminPromoteHistoryEntry(id, category);
+      await Promise.all([refreshHistory(), refreshAnnouncements()]);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPromotingHistoryId(null);
+    }
+  }
+
+  async function confirmDeleteHistoryEntry() {
+    if (!confirmDeleteHistory) return;
+    const id = confirmDeleteHistory.id;
+    setHistoryError(null);
+    setDeletingHistoryId(id);
+    try {
+      await api.adminDeleteHistoryEntry(id);
+      setConfirmDeleteHistory(null);
+      await refreshHistory();
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingHistoryId(null);
+    }
+  }
+
   useEffect(() => {
     refresh();
     refreshAnnouncements();
+    refreshHistory();
   }, []);
 
   function startNew() {
@@ -328,6 +367,76 @@ export default function Dashboard() {
           </ul>
         </div>
       </div>
+
+      <h2 className="dashboard-section-title">WorkFM: History</h2>
+      <p className="muted">
+        Every track that's ever played, most recent first. Download saves the audio locally. "Mark as ad"/"Mark as
+        announcement" moves it into that pool below (downloading it again if needed) and removes it from here, so it can
+        no longer be queued/requeued as a regular song. Deleting removes it from history/most-liked/most-played
+        entirely — it won't affect the request queue on the WorkFM page, which still lets people requeue from history.
+      </p>
+      {historyError && <div className="error">{historyError}</div>}
+      <ul className="announcement-file-list">
+        {history.length === 0 && <li className="muted">Nothing's played yet.</li>}
+        {history.map((h) => (
+          <li key={h.id}>
+            <span>
+              {h.artist} - {h.title}
+            </span>
+            <div className="header-actions">
+              <a className="btn-secondary" href={api.adminDownloadHistoryEntry(h.id)} download>
+                Download
+              </a>
+              <button
+                className="btn-secondary"
+                disabled={promotingHistoryId === h.id}
+                onClick={() => promoteHistoryEntry(h.id, "announcement")}
+              >
+                {promotingHistoryId === h.id ? "Working…" : "Mark as announcement"}
+              </button>
+              <button
+                className="btn-secondary"
+                disabled={promotingHistoryId === h.id}
+                onClick={() => promoteHistoryEntry(h.id, "ad")}
+              >
+                {promotingHistoryId === h.id ? "Working…" : "Mark as ad"}
+              </button>
+              <button
+                className="btn-danger"
+                disabled={deletingHistoryId === h.id}
+                onClick={() => setConfirmDeleteHistory(h)}
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {confirmDeleteHistory && (
+        <div className="modal-backdrop" onClick={() => setConfirmDeleteHistory(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Remove from history?</h2>
+            <p>
+              This permanently removes "{confirmDeleteHistory.artist} - {confirmDeleteHistory.title}" from history,
+              most-liked, and most-played (and deletes its saved file, if any). This can't be undone.
+            </p>
+            {historyError && <div className="error">{historyError}</div>}
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setConfirmDeleteHistory(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-danger"
+                disabled={deletingHistoryId === confirmDeleteHistory.id}
+                onClick={confirmDeleteHistoryEntry}
+              >
+                {deletingHistoryId === confirmDeleteHistory.id ? "Removing…" : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingSlug && (
         <div className="modal-backdrop" onClick={cancelEdit}>

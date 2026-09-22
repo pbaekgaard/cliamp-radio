@@ -1,3 +1,4 @@
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import {
   changePassword,
@@ -8,9 +9,9 @@ import {
   verifyCredentials,
 } from "./lib/auth";
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
-import { getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
+import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
-import { searchYouTube } from "./lib/youtube";
+import { drainText, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
 import { extractSpotifyTrackId, resolveSpotifyTrackQuery } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
@@ -29,6 +30,7 @@ import {
   deleteAnnouncementFile,
   listAnnouncementFiles,
   saveAnnouncementFile,
+  saveAnnouncementFromDisk,
   saveAnnouncementFromYouTube,
   type AnnouncementCategory,
 } from "./lib/workfmAnnouncements";
@@ -46,6 +48,14 @@ function json(data: unknown, init: ResponseInit = {}) {
 
 function unauthorized() {
   return json({ error: "unauthorized" }, { status: 401 });
+}
+
+/** Strips characters that would break a Content-Disposition filename or
+ * cause issues in a downloaded file's name across OSes (quotes, slashes,
+ * control chars) — used when serving a History entry's audio for download. */
+function sanitizeDownloadFilename(name: string): string {
+  const cleaned = name.replace(/["/\\:*?<>|\r\n]/g, "").trim();
+  return cleaned || "track";
 }
 
 // HTTP header values must be Latin-1/ASCII-ish — room names are freeform
@@ -289,14 +299,20 @@ const server = Bun.serve({
       if (!q) return json({ results: [] });
       try {
         // A pasted Spotify track link can't be played directly (DRM), so
-        // resolve it to an "artist title" string first and search YouTube
-        // for that instead — same dropdown-of-results UX either way.
+        // resolve it to an "artist title" string first and search for that
+        // instead — same dropdown-of-results UX either way. For Spotify
+        // links specifically we search YouTube *Music*'s "Songs" section
+        // rather than plain YouTube video search, since we already know
+        // we want the official song audio (not lyric videos, covers,
+        // reactions, live performances, etc. that a general search surfaces).
         const spotifyTrackId = extractSpotifyTrackId(q);
         const searchQuery = spotifyTrackId ? await resolveSpotifyTrackQuery(spotifyTrackId) : q;
         if (spotifyTrackId && !searchQuery) {
           return json({ error: "couldn't read that Spotify track — try pasting its name instead" }, { status: 400 });
         }
-        const results = await searchYouTube(searchQuery!, 8);
+        const results = spotifyTrackId
+          ? await searchYouTubeMusic(searchQuery!, 8)
+          : await searchYouTube(searchQuery!, 8);
         return json({ results });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "search failed" }, { status: 500 });
@@ -541,6 +557,118 @@ const server = Bun.serve({
       if (!room) return json({ error: "room not found" }, { status: 404 });
       room.stream.forceAnnouncement();
       return json({ ok: true });
+    }
+
+    // Admin: manage the WorkFM library/history (delete a played track's
+    // record, e.g. to remove something embarrassing/wrong from history —
+    // see workfmLibrary.ts). Listeners' own history/requeue view (GET
+    // /api/workfm/library) is unaffected other than the entry disappearing.
+    if (pathname === "/api/admin/workfm/history" && req.method === "GET") {
+      if (!requireAuth(req)) return unauthorized();
+      return json(listHistory(undefined, 1000));
+    }
+
+    const historyDeleteMatch = pathname.match(/^\/api\/admin\/workfm\/history\/([^/]+)$/);
+    if (historyDeleteMatch && req.method === "DELETE") {
+      if (!requireAuth(req)) return unauthorized();
+      const ok = await deleteLibraryEntry(decodeURIComponent(historyDeleteMatch[1]!));
+      return ok ? json({ ok: true }) : json({ error: "not found" }, { status: 404 });
+    }
+
+    // Admin: download a History entry's audio — streams the saved file
+    // directly for uploads, or downloads the audio fresh via yt-dlp (to a
+    // throwaway temp file, cleaned up immediately after) for YouTube tracks
+    // that were never saved to disk locally.
+    const historyDownloadMatch = pathname.match(/^\/api\/admin\/workfm\/history\/([^/]+)\/download$/);
+    if (historyDownloadMatch && req.method === "GET") {
+      if (!requireAuth(req)) return unauthorized();
+      const entry = getLibraryTrack(decodeURIComponent(historyDownloadMatch[1]!));
+      if (!entry) return json({ error: "not found" }, { status: 404 });
+      const downloadName = `${sanitizeDownloadFilename(`${entry.artist} - ${entry.title}`)}.mp3`;
+
+      if (entry.source === "upload") {
+        if (!entry.savedFilePath || !(await Bun.file(entry.savedFilePath).exists())) {
+          return json({ error: "that file is no longer saved on disk" }, { status: 404 });
+        }
+        return new Response(Bun.file(entry.savedFilePath), {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Content-Disposition": `attachment; filename="${downloadName}"`,
+          },
+        });
+      }
+
+      const videoUrl = entry.url || (entry.videoId ? `https://www.youtube.com/watch?v=${entry.videoId}` : null);
+      if (!videoUrl) return json({ error: "no video URL on record for this track" }, { status: 400 });
+      const tmpDir = path.join(import.meta.dir, "data", "workfm-history-downloads");
+      await mkdir(tmpDir, { recursive: true });
+      const tmpId = crypto.randomUUID();
+      const tmpPath = path.join(tmpDir, `${tmpId}.mp3`);
+      const proc = Bun.spawn(
+        [
+          "yt-dlp",
+          ...YTDLP_COOKIE_ARGS,
+          ...YTDLP_EXTRA_ARGS,
+          "-x",
+          "--audio-format",
+          "mp3",
+          "--no-playlist",
+          "--quiet",
+          "--no-warnings",
+          "-o",
+          path.join(tmpDir, `${tmpId}.%(ext)s`),
+          videoUrl,
+        ],
+        { stdout: "pipe", stderr: "pipe" }
+      );
+      const stderr = await drainText(proc.stderr);
+      const exitCode = await proc.exited;
+      if (exitCode !== 0 || !(await Bun.file(tmpPath).exists())) {
+        return json({ error: `failed to download audio${stderr.trim() ? `: ${stderr.trim()}` : ""}` }, { status: 502 });
+      }
+      const bytes = await Bun.file(tmpPath).arrayBuffer();
+      await rm(tmpPath, { force: true });
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Content-Disposition": `attachment; filename="${downloadName}"`,
+        },
+      });
+    }
+
+    // Admin: promote a History entry into the announcements/ads pool —
+    // copies its audio (or, for YouTube, downloads it fresh via yt-dlp)
+    // into workfm-announcements/, then removes the History entry so it can
+    // no longer be requeued/auto-DJ'd as a regular song; from then on it
+    // only plays as a scheduled ad/announcement (see workfmQueue.ts).
+    const historyPromoteMatch = pathname.match(/^\/api\/admin\/workfm\/history\/([^/]+)\/promote$/);
+    if (historyPromoteMatch && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const id = decodeURIComponent(historyPromoteMatch[1]!);
+      const entry = getLibraryTrack(id);
+      if (!entry) return json({ error: "not found" }, { status: 404 });
+      const body = await req.json().catch(() => null);
+      const category: AnnouncementCategory | null =
+        body?.category === "ad" ? "ad" : body?.category === "announcement" ? "announcement" : null;
+      if (!category) return json({ error: "category ('announcement' or 'ad') is required" }, { status: 400 });
+      const label = `${entry.artist} - ${entry.title}`;
+      try {
+        const promoted =
+          entry.source === "upload"
+            ? entry.savedFilePath
+              ? await saveAnnouncementFromDisk(category, entry.savedFilePath, label)
+              : null
+            : await saveAnnouncementFromYouTube(
+                category,
+                entry.url || `https://www.youtube.com/watch?v=${entry.videoId}`,
+                label
+              );
+        if (!promoted) return json({ error: "that upload's file is no longer saved on disk" }, { status: 400 });
+        await deleteLibraryEntry(id);
+        return json(promoted, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : `failed to mark as ${category}` }, { status: 400 });
+      }
     }
 
     // --- Listeners (for the globe) ---

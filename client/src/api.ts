@@ -365,4 +365,21 @@ export const api = {
     request(`/api/admin/workfm/announcements/${encodeURIComponent(id)}`, { method: "DELETE" }),
   adminForceAdBreak: () => request<{ ok: boolean }>("/api/admin/workfm/force-ad", { method: "POST" }),
   adminForceAnnouncement: () => request<{ ok: boolean }>("/api/admin/workfm/force-announcement", { method: "POST" }),
+  adminListHistory: () => request<WorkFmLibraryTrack[]>("/api/admin/workfm/history"),
+  adminDeleteHistoryEntry: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/workfm/history/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  adminDownloadHistoryEntry: (id: string) => `/api/admin/workfm/history/${encodeURIComponent(id)}/download`,
+  adminPromoteHistoryEntry: async (id: string, category: "announcement" | "ad") => {
+    const res = await fetch(`/api/admin/workfm/history/${encodeURIComponent(id)}/promote`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(body.error || `Request failed: ${res.status}`);
+    }
+    return res.json() as Promise<WorkFmAnnouncementFile>;
+  },
 };

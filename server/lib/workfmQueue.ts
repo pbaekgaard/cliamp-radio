@@ -6,6 +6,7 @@ import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, list
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 import {
   announcementFilePath,
+  listAnnouncementFiles,
   pickRandomAnnouncementFiles,
   type AnnouncementCategory,
   type AnnouncementFile,
@@ -69,15 +70,25 @@ const AUTO_DJ_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 // How often the idle sleep loop checks whether someone's shown up again.
 const IDLE_POLL_INTERVAL_MS = 3 * 1000;
 // How often (in ms of *actual playback time* — see msSincePlayClockStart())
-// an announcement plays solo, and an ad break of AD_BREAK_FILE_COUNT ad
-// files plays back-to-back — both inserted right after the currently
-// playing track finishes naturally (see loop()'s maybeInsertSpecials()).
-// Deliberately measured against playback time rather than wall-clock time,
-// so a room that's been asleep (see sleepUntilNotIdle()) doesn't come back
-// owing a pile of "overdue" announcements/ads.
+// an announcement plays solo, and an ad break (at least AD_BREAK_MIN_DURATION_MS
+// worth of ads, always capped off with an announcement) plays back-to-back —
+// both inserted right after the currently playing track finishes naturally
+// (see loop()'s maybeInsertSpecials()). Deliberately measured against
+// playback time rather than wall-clock time, so a room that's been asleep
+// (see sleepUntilNotIdle()) doesn't come back owing a pile of "overdue"
+// announcements/ads.
 const ANNOUNCEMENT_INTERVAL_MS = 30 * 60 * 1000;
 const AD_BREAK_INTERVAL_MS = 60 * 60 * 1000;
-const AD_BREAK_FILE_COUNT = 2;
+// An ad break keeps adding random ads (repeats allowed once the pool's
+// exhausted) until their combined duration reaches this — so picking one
+// short ad doesn't end the break in a couple of seconds. Always finishes
+// with one announcement before the music resumes (see maybeInsertSpecials()
+// and pickAdBreakEntries()).
+const AD_BREAK_MIN_DURATION_MS = 45 * 1000;
+// Safety cap on how many ads a single break can pick, in case the pool is
+// full of very short (or unprobeable-duration) files — keeps
+// pickAdBreakEntries() from looping indefinitely.
+const AD_BREAK_MAX_FILES = 30;
 // A "listener" is someone whose browser currently has an open connection to
 // the actual audio stream (i.e. they clicked "Listen live" and are still
 // playing it, or are tuned in via cliamp) — see subscribe() below. Merely
@@ -122,10 +133,13 @@ export interface QueueItem {
    * workfmAnnouncements.ts + loop()'s maybeInsertSpecials()/playSpecial())
    * — an admin-uploaded mp3 played automatically between real tracks.
    * Never sits in the visible request queue, only ever exists as
-   * `this.current` while playing. Unskippable/un-repeatable (see
-   * requestSkip/requestRepeat) and rendered without a progress bar or
-   * requested-by/like/vote controls client-side (see WorkFm.tsx) — just
-   * the fixed "ANNOUNCEMENT"/"ADVERTISEMENT" label in `title`. */
+   * `this.current` while playing. Un-repeatable always; announcements are
+   * also unskippable, but an ad break CAN be majority-voted to skip (see
+   * requestSkip/requestRepeat) — rendered without a progress bar or
+   * requested-by/like/repeat-vote controls client-side (see WorkFm.tsx),
+   * just the fixed "ANNOUNCEMENT"/"ADVERTISEMENT" label in `title` (plus a
+   * skip-vote button for ads).
+   */
   special?: AnnouncementCategory;
 }
 
@@ -788,7 +802,10 @@ class WorkFmQueueStream {
     hasVoted?: boolean;
   } {
     if (!this.current) return { ok: false, error: "nothing is playing" };
-    if (this.current.special) return { ok: false, error: "this can't be skipped" };
+    // Announcements are always unskippable; ad breaks are the one exception
+    // (see playSpecial()'s per-entry gen check, which ends the whole break
+    // — not just the currently airing file — once this succeeds).
+    if (this.current.special === "announcement") return { ok: false, error: "this can't be skipped" };
     const name = requestedBy.toLowerCase();
 
     // Toggle: voting again removes your vote, in case you change your mind.
@@ -1057,16 +1074,26 @@ class WorkFmQueueStream {
    * Called at every real track boundary (right after one finishes, whether
    * played fully or skipped) — inserts a scheduled ad break and/or
    * announcement if either is due (see ANNOUNCEMENT_INTERVAL_MS/
-   * AD_BREAK_INTERVAL_MS), ad break first per the requested ordering ("play
-   * ad break, then finish with announcement"). A no-op if no files have
-   * been uploaded for a due category yet (see workfmAnnouncements.ts).
+   * AD_BREAK_INTERVAL_MS). An ad break always finishes with one announcement
+   * before returning to music (see pickAdBreakEntries()), which also
+   * satisfies/resets the solo-announcement timer — so the standalone
+   * announcement check below only ever fires when an ad break *didn't* just
+   * play one. A no-op if no files have been uploaded for a due category yet
+   * (see workfmAnnouncements.ts).
    */
   private async maybeInsertSpecials(): Promise<void> {
     if (this.forcedAdBreak || this.msSincePlayClockStart() - this.lastAdBreakAtMs >= AD_BREAK_INTERVAL_MS) {
       this.forcedAdBreak = false;
       this.lastAdBreakAtMs = this.msSincePlayClockStart();
-      const entries = await pickRandomAnnouncementFiles("ad", AD_BREAK_FILE_COUNT);
-      if (entries.length > 0) await this.playSpecial("ad", entries, "ADVERTISEMENT");
+      const ads = await this.pickAdBreakEntries();
+      if (ads.length > 0) {
+        await this.playSpecial("ad", ads, "ADVERTISEMENT");
+        this.forcedAnnouncement = false;
+        this.lastAnnouncementAtMs = this.msSincePlayClockStart();
+        const announcement = await pickRandomAnnouncementFiles("announcement", 1);
+        if (announcement.length > 0) await this.playSpecial("announcement", announcement, "ANNOUNCEMENT");
+        return;
+      }
     }
     if (this.forcedAnnouncement || this.msSincePlayClockStart() - this.lastAnnouncementAtMs >= ANNOUNCEMENT_INTERVAL_MS) {
       this.forcedAnnouncement = false;
@@ -1077,15 +1104,44 @@ class WorkFmQueueStream {
   }
 
   /**
+   * Picks the ads for a single ad break: keeps adding random picks (repeats
+   * allowed once the pool's been exhausted once) until their combined
+   * duration reaches AD_BREAK_MIN_DURATION_MS, so a short first pick doesn't
+   * end the break in a couple of seconds — bounded by AD_BREAK_MAX_FILES in
+   * case the pool is full of very short/unprobeable-duration files. Returns
+   * [] if there are no ad files uploaded at all yet.
+   */
+  private async pickAdBreakEntries(): Promise<AnnouncementFile[]> {
+    const pool = await listAnnouncementFiles("ad");
+    if (pool.length === 0) return [];
+    const picked: AnnouncementFile[] = [];
+    let totalMs = 0;
+    while (totalMs < AD_BREAK_MIN_DURATION_MS && picked.length < AD_BREAK_MAX_FILES) {
+      const entry = pool[Math.floor(Math.random() * pool.length)]!;
+      picked.push(entry);
+      const durationSec = await probeFileDurationSec(announcementFilePath(entry));
+      // Unknown duration (probe failed): assume a conservative 15s rather
+      // than looping forever or risking a too-short break.
+      totalMs += (durationSec ?? 15) * 1000;
+    }
+    return picked;
+  }
+
+  /**
    * Plays one or more admin-uploaded mp3 files back-to-back as a single
-   * "special" broadcast segment (an announcement or an ad break) —
-   * unskippable/un-repeatable (see requestSkip/requestRepeat) and shown to
+   * "special" broadcast segment (an announcement or an ad break) — shown to
    * listeners as `label` instead of a real track/artist, with no progress
-   * bar or requested-by/like/vote controls (see QueueItem.special +
-   * WorkFm.tsx). Reuses playUpload() for the actual local-file playback,
-   * same as any other uploaded mp3.
+   * bar or requested-by/like/repeat-vote controls (see QueueItem.special +
+   * WorkFm.tsx). Un-repeatable always; announcements are also unskippable,
+   * but a majority skip vote (see requestSkip()) during an ad ends the
+   * *entire* remaining break — not just the currently airing file — via the
+   * currentGen check below, the same mechanism a real track's skip uses.
+   * Resets any stale skip votes at the start of each segment. Reuses
+   * playUpload() for the actual local-file playback, same as any other
+   * uploaded mp3.
    */
   private async playSpecial(category: AnnouncementCategory, entries: AnnouncementFile[], label: string): Promise<void> {
+    this.skipVotes.clear();
     for (const entry of entries) {
       const item: QueueItem = {
         id: this.nextId++,
@@ -1109,7 +1165,9 @@ class WorkFmQueueStream {
       } catch (err) {
         console.error(`[workfm-queue] failed to play ${category} "${entry.title}":`, err);
       }
+      if (this.currentGen !== gen) break; // skip-voted mid-ad — end the whole break, not just this file
     }
+    this.skipVotes.clear();
   }
 
   private async playEntry(entry: QueueItem, gen: number): Promise<void> {
