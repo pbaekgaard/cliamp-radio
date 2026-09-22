@@ -946,6 +946,11 @@ input {
   }
   .workfm-layout {
     flex-direction: column;
+    align-items: stretch;
+  }
+  .workfm-main {
+    width: 100%;
+    min-width: 0;
   }
   .workfm-sidebar {
     width: 100%;
@@ -983,6 +988,9 @@ input {
     flex-direction: column;
   }
   .workfm-queue-row {
+    flex-wrap: wrap;
+  }
+  .workfm-library-row {
     flex-wrap: wrap;
   }
   .workfm-queue-row-meta {

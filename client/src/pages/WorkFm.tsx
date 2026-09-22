@@ -610,10 +610,15 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
 }
 
 function RoomPage({ slug }: { slug: string }) {
-  const { name: identityName, roomSlug, identify, forget } = useWorkFm();
-  // WorkFM never carries a name across rooms — if the current identity was
-  // picked for a different room (or none at all), treat this room as
-  // "not joined" until the visitor picks a name via JoinRoomModal.
+  const { name: identityName, roomSlug, identify, bindRoom, forget } = useWorkFm();
+  // A session restored on page load (see WorkFmProvider) doesn't know which
+  // room it belongs to yet — bind it to this one now that we know it, so a
+  // refresh doesn't look like "not joined" and force rejoining. Harmless to
+  // rebind on every render where it's already a match; WorkFM only has this
+  // one persistent room in practice.
+  useEffect(() => {
+    if (identityName && roomSlug !== slug) bindRoom(slug);
+  }, [identityName, roomSlug, slug, bindRoom]);
   const name = roomSlug === slug ? identityName : null;
   const [state, setState] = useState<WorkFmQueueState>({
     roomName: "",
