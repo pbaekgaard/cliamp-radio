@@ -12,7 +12,7 @@ import { getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLi
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
 import { searchYouTube } from "./lib/youtube";
 import { extractSpotifyTrackId, resolveSpotifyTrackQuery } from "./lib/spotify";
-import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom } from "./lib/workfmRooms";
+import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
 import { checkForUpdate, getCurrentVersion, runUpdate, scheduleServiceRestart } from "./lib/update";
 import {
@@ -522,6 +522,25 @@ const server = Bun.serve({
       if (!requireAuth(req)) return unauthorized();
       const ok = await deleteAnnouncementFile(decodeURIComponent(announcementMatch[1]!));
       return ok ? json({ ok: true }) : json({ error: "not found" }, { status: 404 });
+    }
+
+    // Admin test hooks: force an ad break / announcement to play at the
+    // very next WorkFM track boundary, instead of waiting for the real
+    // interval — lets an admin verify the feature works end-to-end.
+    if (pathname === "/api/admin/workfm/force-ad" && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      room.stream.forceAdBreak();
+      return json({ ok: true });
+    }
+
+    if (pathname === "/api/admin/workfm/force-announcement" && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      room.stream.forceAnnouncement();
+      return json({ ok: true });
     }
 
     // --- Listeners (for the globe) ---

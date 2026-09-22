@@ -21,6 +21,9 @@ export default function Dashboard() {
   const [uploadingAd, setUploadingAd] = useState(false);
   const [addingAdFromYoutube, setAddingAdFromYoutube] = useState(false);
   const [adYoutubeUrl, setAdYoutubeUrl] = useState("");
+  const [forcingAd, setForcingAd] = useState(false);
+  const [forcingAnnouncement, setForcingAnnouncement] = useState(false);
+  const [forceMessage, setForceMessage] = useState<string | null>(null);
   const announcementFileInput = useRef<HTMLInputElement>(null);
   const adFileInput = useRef<HTMLInputElement>(null);
 
@@ -73,6 +76,32 @@ export default function Dashboard() {
       await refreshAnnouncements();
     } catch (err) {
       setAnnouncementError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function forceAdBreak() {
+    setForceMessage(null);
+    setForcingAd(true);
+    try {
+      await api.adminForceAdBreak();
+      setForceMessage("Ad break will play next, as soon as the current song finishes.");
+    } catch (err) {
+      setForceMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setForcingAd(false);
+    }
+  }
+
+  async function forceAnnouncement() {
+    setForceMessage(null);
+    setForcingAnnouncement(true);
+    try {
+      await api.adminForceAnnouncement();
+      setForceMessage("Announcement will play next, as soon as the current song finishes.");
+    } catch (err) {
+      setForceMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setForcingAnnouncement(false);
     }
   }
 
@@ -213,6 +242,15 @@ export default function Dashboard() {
         Announcements play solo every 30 minutes of playback; ad breaks play 2 random ads back-to-back every hour.
         Both are unskippable and shown to listeners as "ANNOUNCEMENT"/"ADVERTISEMENT".
       </p>
+      <div className="header-actions">
+        <button className="btn-secondary" disabled={forcingAnnouncement} onClick={forceAnnouncement}>
+          {forcingAnnouncement ? "Forcing…" : "Force announcement"}
+        </button>
+        <button className="btn-secondary" disabled={forcingAd} onClick={forceAdBreak}>
+          {forcingAd ? "Forcing…" : "Force ad break"}
+        </button>
+      </div>
+      {forceMessage && <p className="muted">{forceMessage}</p>}
       {announcementError && <div className="error">{announcementError}</div>}
       <div className="announcement-sections">
         <div className="announcement-section">

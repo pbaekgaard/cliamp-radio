@@ -277,6 +277,17 @@ class WorkFmQueueStream {
   // in loop()'s maybeInsertSpecials().
   private lastAnnouncementAtMs = 0;
   private lastAdBreakAtMs = 0;
+  // Set by sleepUntilNotIdle() when the auto-DJ was fully resting (nothing
+  // playing, nobody around) and someone shows up again — checked at the top
+  // of loop() so the very next thing anyone hears is a welcome announcement,
+  // before any song resumes. See maybePlayWelcomeAnnouncement().
+  private pendingWelcomeAnnouncement = false;
+  // Set by the admin dashboard's "Force ad"/"Force announcement" test
+  // buttons (see forceAdBreak()/forceAnnouncement() below) — checked ahead
+  // of the normal timer in maybeInsertSpecials() so the very next track
+  // boundary plays one immediately, without waiting for the real interval.
+  private forcedAdBreak = false;
+  private forcedAnnouncement = false;
 
   /** Total ms of actual playback activity since this room was created,
    * excluding any stretches spent asleep (idle, no listeners — see
@@ -830,6 +841,21 @@ class WorkFmQueueStream {
     return { ok: true, armed: this.repeatArmed, votes, total, hasVoted: this.repeatVotes.has(name) };
   }
 
+  /**
+   * Admin test hooks (Dashboard's "Force ad"/"Force announcement" buttons):
+   * flags the respective special to play at the very next track boundary,
+   * regardless of the real timer — so an admin can verify the feature
+   * without waiting up to an hour/30 minutes. A no-op if one's already
+   * pending (repeated clicks don't queue up multiple).
+   */
+  forceAdBreak(): void {
+    this.forcedAdBreak = true;
+  }
+
+  forceAnnouncement(): void {
+    this.forcedAnnouncement = true;
+  }
+
   /** Kills the in-flight yt-dlp/ffmpeg pair, which ends the current track's playback loop. */
   private killPlayback() {
     this.currentGen++; // invalidates the in-flight playEntry loop
@@ -928,10 +954,26 @@ class WorkFmQueueStream {
       await Bun.sleep(IDLE_POLL_INTERVAL_MS);
     }
     this.resumePlayClock();
+    if (this.currentGen === gen) this.pendingWelcomeAnnouncement = true;
+  }
+
+  /**
+   * Plays one random announcement before anything else, if the auto-DJ just
+   * woke up from being fully idle (see sleepUntilNotIdle()) — so someone
+   * joining an empty room hears an announcement first instead of dropping
+   * straight into the middle of a song. A no-op once consumed, or if no
+   * announcement files have been uploaded yet.
+   */
+  private async maybePlayWelcomeAnnouncement(): Promise<void> {
+    if (!this.pendingWelcomeAnnouncement) return;
+    this.pendingWelcomeAnnouncement = false;
+    const entries = await pickRandomAnnouncementFiles("announcement", 1);
+    if (entries.length > 0) await this.playSpecial("announcement", entries, "ANNOUNCEMENT");
   }
 
   private async loop() {
     while (true) {
+      await this.maybePlayWelcomeAnnouncement();
       if (this.queue.length === 0) {
         const emptySince = this.emptySince;
         if (emptySince !== null && Date.now() - emptySince >= AUTO_DJ_IDLE_TIMEOUT_MS) {
@@ -1020,12 +1062,14 @@ class WorkFmQueueStream {
    * been uploaded for a due category yet (see workfmAnnouncements.ts).
    */
   private async maybeInsertSpecials(): Promise<void> {
-    if (this.msSincePlayClockStart() - this.lastAdBreakAtMs >= AD_BREAK_INTERVAL_MS) {
+    if (this.forcedAdBreak || this.msSincePlayClockStart() - this.lastAdBreakAtMs >= AD_BREAK_INTERVAL_MS) {
+      this.forcedAdBreak = false;
       this.lastAdBreakAtMs = this.msSincePlayClockStart();
       const entries = await pickRandomAnnouncementFiles("ad", AD_BREAK_FILE_COUNT);
       if (entries.length > 0) await this.playSpecial("ad", entries, "ADVERTISEMENT");
     }
-    if (this.msSincePlayClockStart() - this.lastAnnouncementAtMs >= ANNOUNCEMENT_INTERVAL_MS) {
+    if (this.forcedAnnouncement || this.msSincePlayClockStart() - this.lastAnnouncementAtMs >= ANNOUNCEMENT_INTERVAL_MS) {
+      this.forcedAnnouncement = false;
       this.lastAnnouncementAtMs = this.msSincePlayClockStart();
       const entries = await pickRandomAnnouncementFiles("announcement", 1);
       if (entries.length > 0) await this.playSpecial("announcement", entries, "ANNOUNCEMENT");

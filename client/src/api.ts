@@ -363,4 +363,6 @@ export const api = {
   },
   adminDeleteAnnouncement: (id: string) =>
     request(`/api/admin/workfm/announcements/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  adminForceAdBreak: () => request<{ ok: boolean }>("/api/admin/workfm/force-ad", { method: "POST" }),
+  adminForceAnnouncement: () => request<{ ok: boolean }>("/api/admin/workfm/force-announcement", { method: "POST" }),
 };
