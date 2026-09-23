@@ -502,11 +502,12 @@ const server = Bun.serve({
     // lib/workfmAnnouncements.ts + workfmQueue.ts's maybeInsertSpecials()) ---
     if (pathname === "/api/admin/workfm/announcements" && req.method === "GET") {
       if (!requireAuth(req)) return unauthorized();
-      const [announcements, ads] = await Promise.all([
+      const [announcements, ads, spisetid] = await Promise.all([
         listAnnouncementFiles("announcement"),
         listAnnouncementFiles("ad"),
+        listAnnouncementFiles("spisetid"),
       ]);
-      return json({ announcements, ads });
+      return json({ announcements, ads, spisetid });
     }
 
     if (pathname === "/api/admin/workfm/announcements" && req.method === "POST") {
@@ -514,9 +515,9 @@ const server = Bun.serve({
       const formData = await req.formData().catch(() => null);
       const categoryRaw = formData?.get("category");
       const category: AnnouncementCategory | null =
-        categoryRaw === "ad" ? "ad" : categoryRaw === "announcement" ? "announcement" : null;
+        categoryRaw === "ad" ? "ad" : categoryRaw === "announcement" ? "announcement" : categoryRaw === "spisetid" ? "spisetid" : null;
       if (!category) {
-        return json({ error: "category ('announcement' or 'ad') is required" }, { status: 400 });
+        return json({ error: "category ('announcement', 'ad', or 'spisetid') is required" }, { status: 400 });
       }
       const titleRaw = formData?.get("title");
       const title = typeof titleRaw === "string" ? titleRaw : undefined;
@@ -560,6 +561,26 @@ const server = Bun.serve({
       const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
       if (!room) return json({ error: "room not found" }, { status: 404 });
       room.stream.forceAnnouncement();
+      return json({ ok: true });
+    }
+
+    // Admin controls for spisetid (the 11:30–12:00 Danish lunch-break
+    // pause — see workfmQueue.ts's runSpiseTid()): "force" immediately runs
+    // a full alarm→pause→resume test cycle regardless of the real time,
+    // "stop" ends it right away (whether forced or the real schedule).
+    if (pathname === "/api/admin/workfm/force-spisetid" && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      room.stream.forceSpiseTid();
+      return json({ ok: true });
+    }
+
+    if (pathname === "/api/admin/workfm/stop-spisetid" && req.method === "POST") {
+      if (!requireAuth(req)) return unauthorized();
+      const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      room.stream.stopSpiseTid();
       return json({ ok: true });
     }
 

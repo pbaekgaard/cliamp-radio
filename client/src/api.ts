@@ -109,11 +109,14 @@ export interface WorkFmQueueItem {
   /** "Vote next" tally for this queued item — only meaningful for entries
    * still in `queue` (moving the currently-playing track doesn't apply). */
   nextVote?: WorkFmNextVoteState;
-  /** Set when this is a scheduled announcement or ad-break "track" rather
-   * than a real song — see server/lib/workfmAnnouncements.ts. Unskippable;
+  /** Set when this is a scheduled announcement, ad-break, or spisetid
+   * (lunch-break alarm/pause) "track" rather than a real song — see
+   * server/lib/workfmAnnouncements.ts. Unskippable (except ad breaks);
    * clients should hide the progress bar and requested-by/like/vote
-   * controls and just show `title` ("ANNOUNCEMENT"/"ADVERTISEMENT"). */
-  special?: "announcement" | "ad";
+   * controls and just show `title` ("ANNOUNCEMENT"/"ADVERTISEMENT"/
+   * "SUUUUUULT"). "spisetid" should also trigger the full-screen alarm
+   * overlay (see SpiseTidOverlay). */
+  special?: "announcement" | "ad" | "spisetid";
 }
 
 export interface WorkFmChatMessage {
@@ -233,7 +236,7 @@ export type WorkFmLibraryView = "history" | "most-liked" | "saved";
 
 export interface WorkFmAnnouncementFile {
   id: string;
-  category: "announcement" | "ad";
+  category: "announcement" | "ad" | "spisetid";
   title: string;
   filename: string;
   uploadedAt: number;
@@ -338,10 +341,12 @@ export const api = {
   workfmToggleLike: (id: string) =>
     request<{ likes: number; liked: boolean }>(`/api/workfm/library/${encodeURIComponent(id)}/like`, { method: "POST" }),
 
-  // --- WorkFM announcements/ads (admin) ---
+  // --- WorkFM announcements/ads/spisetid (admin) ---
   adminListAnnouncements: () =>
-    request<{ announcements: WorkFmAnnouncementFile[]; ads: WorkFmAnnouncementFile[] }>("/api/admin/workfm/announcements"),
-  adminUploadAnnouncement: async (category: "announcement" | "ad", file: File, title?: string) => {
+    request<{ announcements: WorkFmAnnouncementFile[]; ads: WorkFmAnnouncementFile[]; spisetid: WorkFmAnnouncementFile[] }>(
+      "/api/admin/workfm/announcements"
+    ),
+  adminUploadAnnouncement: async (category: "announcement" | "ad" | "spisetid", file: File, title?: string) => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("category", category);
@@ -353,7 +358,7 @@ export const api = {
     }
     return res.json() as Promise<WorkFmAnnouncementFile>;
   },
-  adminAddAnnouncementFromYoutube: async (category: "announcement" | "ad", youtubeUrl: string, title?: string) => {
+  adminAddAnnouncementFromYoutube: async (category: "announcement" | "ad" | "spisetid", youtubeUrl: string, title?: string) => {
     const formData = new FormData();
     formData.append("category", category);
     formData.append("youtubeUrl", youtubeUrl.trim());
@@ -369,6 +374,8 @@ export const api = {
     request(`/api/admin/workfm/announcements/${encodeURIComponent(id)}`, { method: "DELETE" }),
   adminForceAdBreak: () => request<{ ok: boolean }>("/api/admin/workfm/force-ad", { method: "POST" }),
   adminForceAnnouncement: () => request<{ ok: boolean }>("/api/admin/workfm/force-announcement", { method: "POST" }),
+  adminForceSpiseTid: () => request<{ ok: boolean }>("/api/admin/workfm/force-spisetid", { method: "POST" }),
+  adminStopSpiseTid: () => request<{ ok: boolean }>("/api/admin/workfm/stop-spisetid", { method: "POST" }),
   adminListHistory: () => request<WorkFmLibraryTrack[]>("/api/admin/workfm/history"),
   adminDeleteHistoryEntry: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/workfm/history/${encodeURIComponent(id)}`, { method: "DELETE" }),

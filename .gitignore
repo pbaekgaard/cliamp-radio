@@ -14,5 +14,6 @@ server/data/workfm-library.json
 server/data/workfm-saved-uploads/
 server/data/workfm-announcements/
 server/data/workfm-history-downloads/
+server/data/workfm-prefetch/
 server/data/workfm-chat-state.json
 *.db

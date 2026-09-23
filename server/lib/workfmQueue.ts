@@ -48,6 +48,11 @@ const AUDIO_BYTES_PER_SEC = 16000; // 128kbps ÷ 8 — matches AUDIO_ARGS's bitr
 const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a track starts playing out
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
+// Where tracks get downloaded ahead of time during the spisetid pause
+// window (see prefetchQueue() below), so they start playing instantly the
+// moment music resumes at 12:00 instead of paying yt-dlp's usual ~few-
+// second startup cost on the very first (most noticeable) track back.
+const PREFETCH_DIR = path.join(import.meta.dir, "..", "data", "workfm-prefetch");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
 const MAX_CHAT_MESSAGE_LENGTH = 500;
@@ -93,6 +98,48 @@ const AD_BREAK_MIN_DURATION_MS = 45 * 1000;
 // full of very short (or unprobeable-duration) files — keeps
 // pickAdBreakEntries() from looping indefinitely.
 const AD_BREAK_MAX_FILES = 30;
+// --- "Spisetid" (lunch break) — every weekday, 11:30–12:00 Danish time,
+// Radio Bækgaard pauses for lunch: 11:30–11:40 an alarm sounds (interrupting
+// whatever's currently playing, mid-track if need be), then 11:40–12:00 the
+// stream stays paused/silent while the request queue gets prefetched (see
+// prefetchQueue() below) so playback resumes instantly at 12:00. See
+// enforceSpiseTidSchedule()/runSpiseTid() below for the actual mechanics,
+// and workfmAnnouncements.ts's "spisetid" category for the admin-uploadable
+// alarm sound(s) (falls back to a synthesized siren tone if none are set).
+const SPISETID_TIMEZONE = "Europe/Copenhagen";
+const SPISETID_START_MIN = 15 * 60 + 30; // 15:30 (TEMP — change back to 11:30 after live demo)
+const SPISETID_ALARM_END_MIN = 15 * 60 + 40; // 15:40 (TEMP — change back to 11:40 after live demo)
+const SPISETID_END_MIN = 16 * 60; // 16:00 (TEMP — change back to 12:00 after live demo)
+const SPISETID_ALARM_DURATION_MS = (SPISETID_ALARM_END_MIN - SPISETID_START_MIN) * 60 * 1000;
+const SPISETID_TOTAL_DURATION_MS = (SPISETID_END_MIN - SPISETID_START_MIN) * 60 * 1000;
+// How often the schedule is checked — frequent enough that the alarm
+// interrupts a mid-track song within a couple seconds of 11:30 hitting,
+// without being wasteful.
+const SPISETID_CHECK_INTERVAL_MS = 2 * 1000;
+type SpiseTidPhase = "alarm" | "pause";
+
+/** What the *real, weekly-scheduled* spisetid phase is right now, purely a
+ * function of the current Danish wall-clock time — Mon–Fri only. Doesn't
+ * know about admin forcing/stopping (see WorkFmQueueStream's
+ * computeSpiseTidPhase(), which layers that on top). */
+function getScheduledSpiseTidPhase(): SpiseTidPhase | null {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SPISETID_TIMEZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  if (weekday === "Sat" || weekday === "Sun") return null;
+  const hour = Number.parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const minute = Number.parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+  const mins = hour * 60 + minute;
+  if (mins >= SPISETID_START_MIN && mins < SPISETID_ALARM_END_MIN) return "alarm";
+  if (mins >= SPISETID_ALARM_END_MIN && mins < SPISETID_END_MIN) return "pause";
+  return null;
+}
+
 // A "listener" is someone whose browser currently has an open connection to
 // the actual audio stream (i.e. they clicked "Listen live" and are still
 // playing it, or are tuned in via cliamp) — see subscribe() below. Merely
@@ -310,9 +357,32 @@ class WorkFmQueueStream {
   // pattern, so a burst of messages coalesces into one disk write instead
   // of one per message.
   private chatSaveQueued = false;
+  // --- Spisetid (lunch break) state — see the SPISETID_* constants above
+  // and enforceSpiseTidSchedule()/runSpiseTid() below for the mechanics. ---
+  // Which sub-phase is active right now (null = not spisetid at all).
+  // Recomputed every SPISETID_CHECK_INTERVAL_MS by enforceSpiseTidSchedule().
+  private spiseTidPhase: SpiseTidPhase | null = null;
+  // Set by the admin dashboard's "Force spisetid" test button — runs the
+  // same alarm→pause→resume cycle as the real 11:30 schedule, just on its
+  // own clock instead of Danish wall-clock time. Cleared automatically once
+  // the forced cycle completes, or early by "Stop spisetid".
+  private forcedSpiseTid: { alarmEndsAt: number; endsAt: number } | null = null;
+  // Set by "Stop spisetid" to override the real schedule for a while, so
+  // clicking Stop during the actual 11:30–12:00 window doesn't just have
+  // the very next schedule check re-trigger it immediately.
+  private suppressScheduledSpiseTidUntil: number | null = null;
+  private spiseTidTimer: ReturnType<typeof setInterval> | null = null;
+  // Guards prefetchQueue() so it only actually runs once per pause window.
+  private spiseTidPrefetchDone = false;
+  // queue item id -> on-disk path of its prefetched audio (see
+  // prefetchQueue()/playEntry() below) — consumed (and deleted) the moment
+  // that item starts playing, whether or not it was ever queued during the
+  // pause window that downloaded it.
+  private prefetchedFiles = new Map<number, string>();
 
   constructor() {
     this.loadChatState();
+    this.spiseTidTimer = setInterval(() => this.enforceSpiseTidSchedule(), SPISETID_CHECK_INTERVAL_MS);
   }
 
   /** Loads persisted chat history (see CHAT_STATE_PATH) at startup, so a
@@ -780,6 +850,7 @@ class WorkFmQueueStream {
     }
     const [removed] = this.queue.splice(idx, 1);
     if (removed?.source === "upload") this.cleanupUpload(removed.id).catch(() => {});
+    if (removed) this.cleanupPrefetch(removed.id);
     this.nextVotes.delete(id);
     return { ok: true };
   }
@@ -850,7 +921,9 @@ class WorkFmQueueStream {
     // Announcements are always unskippable; ad breaks are the one exception
     // (see playSpecial()'s per-entry gen check, which ends the whole break
     // — not just the currently airing file — once this succeeds).
-    if (this.current.special === "announcement") return { ok: false, error: "this can't be skipped" };
+    if (this.current.special === "announcement" || this.current.special === "spisetid") {
+      return { ok: false, error: "this can't be skipped" };
+    }
     const name = requestedBy.toLowerCase();
 
     // Toggle: voting again removes your vote, in case you change your mind.
@@ -916,6 +989,67 @@ class WorkFmQueueStream {
 
   forceAnnouncement(): void {
     this.forcedAnnouncement = true;
+  }
+
+  /**
+   * Admin test hook (Dashboard's "Force spisetid" button): immediately
+   * kicks off a full alarm→pause→resume cycle on its own clock (same
+   * durations as the real 11:30 schedule), regardless of the actual
+   * Danish wall-clock time — so an admin can verify/preview the feature
+   * without waiting for lunchtime. A no-op if one's already running.
+   */
+  forceSpiseTid(): void {
+    if (this.forcedSpiseTid) return;
+    const now = Date.now();
+    this.forcedSpiseTid = { alarmEndsAt: now + SPISETID_ALARM_DURATION_MS, endsAt: now + SPISETID_TOTAL_DURATION_MS };
+    this.suppressScheduledSpiseTidUntil = null;
+  }
+
+  /**
+   * Admin control (Dashboard's "Stop spisetid" button): ends spisetid right
+   * now, whether it's a forced test cycle or the real 11:30 schedule —
+   * music resumes at the very next schedule check. If it was the real
+   * schedule, also suppresses it from immediately re-triggering for a
+   * while (otherwise the next check, moments later, would just see the
+   * same real time window and turn it right back on).
+   */
+  stopSpiseTid(): void {
+    this.forcedSpiseTid = null;
+    this.suppressScheduledSpiseTidUntil = Date.now() + 2 * 60 * 60 * 1000; // comfortably past any single day's window
+  }
+
+  /** Whichever spisetid phase should be active *right now*, folding in any
+   * admin override (forced test cycle, or a stop-triggered suppression) on
+   * top of the real weekly schedule — see enforceSpiseTidSchedule() below,
+   * which is what actually acts on this every tick. */
+  private computeSpiseTidPhase(): SpiseTidPhase | null {
+    const now = Date.now();
+    if (this.forcedSpiseTid) {
+      if (now < this.forcedSpiseTid.alarmEndsAt) return "alarm";
+      if (now < this.forcedSpiseTid.endsAt) return "pause";
+      this.forcedSpiseTid = null; // forced cycle finished naturally
+    }
+    if (this.suppressScheduledSpiseTidUntil !== null) {
+      if (now < this.suppressScheduledSpiseTidUntil) return null;
+      this.suppressScheduledSpiseTidUntil = null;
+    }
+    return getScheduledSpiseTidPhase();
+  }
+
+  /**
+   * Ticks every SPISETID_CHECK_INTERVAL_MS (see constructor): recomputes
+   * whether spisetid should be active and, on any change, interrupts
+   * whatever's currently playing (killPlayback()) so loop() reacts within
+   * one tick instead of waiting for the current track to finish naturally
+   * — this is what lets the 11:30 alarm cut in mid-song. loop() itself
+   * reads `spiseTidPhase` at the top of every iteration (see runSpiseTid()).
+   */
+  private enforceSpiseTidSchedule() {
+    const phase = this.computeSpiseTidPhase();
+    if (phase === this.spiseTidPhase) return;
+    if (phase === "alarm") this.spiseTidPrefetchDone = false; // fresh cycle — allow prefetching again
+    this.spiseTidPhase = phase;
+    this.killPlayback();
   }
 
   /** Kills the in-flight yt-dlp/ffmpeg pair, which ends the current track's playback loop. */
@@ -1012,7 +1146,7 @@ class WorkFmQueueStream {
     this.currentStartedAt = null;
     this.currentMetaString = "Radio Bækgaard - auto-DJ resting (no listeners)";
     this.pausePlayClock();
-    while (this.currentGen === gen && this.queue.length === 0 && this.emptySince !== null) {
+    while (this.currentGen === gen && this.queue.length === 0 && this.emptySince !== null && !this.spiseTidPhase) {
       await Bun.sleep(IDLE_POLL_INTERVAL_MS);
     }
     this.resumePlayClock();
@@ -1035,6 +1169,10 @@ class WorkFmQueueStream {
 
   private async loop() {
     while (true) {
+      if (this.spiseTidPhase) {
+        await this.runSpiseTid(this.spiseTidPhase);
+        continue;
+      }
       await this.maybePlayWelcomeAnnouncement();
       if (this.queue.length === 0) {
         const emptySince = this.emptySince;
@@ -1112,6 +1250,157 @@ class WorkFmQueueStream {
         this.cleanupUpload(item.id).catch(() => {});
       }
       await this.maybeInsertSpecials();
+    }
+  }
+
+  /**
+   * Runs one iteration of the active spisetid sub-phase — called from the
+   * very top of loop() whenever `spiseTidPhase` is set, in place of normal
+   * track playback. Each call handles *one* phase's worth of playback (an
+   * alarm loop, or the silent prefetch pause) and returns as soon as
+   * enforceSpiseTidSchedule() changes the phase (via killPlayback()), at
+   * which point loop() re-reads `spiseTidPhase` and calls back in for
+   * whatever's next — so this never has to know what comes after it.
+   */
+  private async runSpiseTid(phase: SpiseTidPhase): Promise<void> {
+    const alarmItem: QueueItem = {
+      id: this.nextId++,
+      videoId: "",
+      url: "",
+      artist: "",
+      title: "ANNOUNCEMENT",
+      addedBy: "Radio Bækgaard",
+      addedAt: Date.now(),
+      source: "upload",
+      libraryId: "spisetid",
+      special: "spisetid",
+    };
+    this.current = alarmItem;
+    this.currentMetaString = "ANNOUNCEMENT";
+    this.currentStartedAt = Date.now();
+    const gen = ++this.currentGen;
+
+    if (phase === "pause") {
+      // The queue's paused anyway — a perfect, otherwise-wasted window to
+      // warm up every requested track so they start playing instantly once
+      // 12:00 hits, instead of each one paying yt-dlp's usual startup cost.
+      this.prefetchQueue().catch((err) => console.error("[workfm-queue] spisetid prefetch failed:", err));
+      await this.streamGeneratedAudio(
+        ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"],
+        gen,
+        () => this.spiseTidPhase === "pause"
+      );
+      return;
+    }
+
+    // Alarm phase: loop admin-uploaded "spisetid" files (see
+    // workfmAnnouncements.ts) back-to-back for as long as the phase lasts;
+    // falls back to a synthesized siren tone if none have been uploaded, so
+    // the alarm always sounds even on a fresh install.
+    while (this.currentGen === gen && this.spiseTidPhase === "alarm") {
+      const [entry] = await pickRandomAnnouncementFiles("spisetid", 1);
+      if (entry) {
+        try {
+          await this.playUpload({ ...alarmItem, diskPath: announcementFilePath(entry) }, gen);
+        } catch (err) {
+          console.error("[workfm-queue] failed to play spisetid alarm file:", err);
+        }
+      } else {
+        await this.streamGeneratedAudio(
+          ["-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=44100", "-af", "tremolo=f=3:d=0.9"],
+          gen,
+          () => this.spiseTidPhase === "alarm"
+        );
+      }
+    }
+  }
+
+  /**
+   * Downloads every currently-queued (real, not auto-DJ) YouTube request's
+   * audio straight to disk, ahead of time, so playEntry() can play it
+   * straight off disk instead of piping live through yt-dlp — see
+   * playEntry()'s prefetchedFiles check. Only ever called during the
+   * spisetid pause window (see runSpiseTid()) and only does this once per
+   * window (spiseTidPrefetchDone). Best-effort per track: a failed
+   * download just means that one track falls back to the normal live path
+   * later, same as if it had never been prefetched.
+   */
+  private async prefetchQueue(): Promise<void> {
+    if (this.spiseTidPrefetchDone) return;
+    this.spiseTidPrefetchDone = true;
+    const targets = this.queue.filter((item) => item.source === "youtube" && !this.prefetchedFiles.has(item.id));
+    if (targets.length === 0) return;
+    await mkdir(PREFETCH_DIR, { recursive: true });
+
+    const PREFETCH_CONCURRENCY = 2; // modest — this is a courtesy prewarm, not worth hammering yt-dlp/network for
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const item = targets[cursor++]!;
+        // Bail out early if we've left the pause window (e.g. an admin hit
+        // "Stop spisetid") — no point starting fresh downloads for a
+        // prefetch window that's already over.
+        if (this.spiseTidPhase !== "pause") return;
+        const id = crypto.randomUUID();
+        const outputTemplate = path.join(PREFETCH_DIR, `${id}.%(ext)s`);
+        const finalPath = path.join(PREFETCH_DIR, `${id}.mp3`);
+        try {
+          const proc = Bun.spawn(
+            ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-x", "--audio-format", "mp3", "--no-playlist", "--quiet", "--no-warnings", "-o", outputTemplate, item.url],
+            { stdout: "pipe", stderr: "pipe" }
+          );
+          const exitCode = await proc.exited;
+          if (exitCode === 0 && (await Bun.file(finalPath).exists())) {
+            this.prefetchedFiles.set(item.id, finalPath);
+          }
+        } catch (err) {
+          console.error(`[workfm-queue] failed to prefetch "${item.artist} - ${item.title}":`, err);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(PREFETCH_CONCURRENCY, targets.length) }, worker));
+  }
+
+  /** Deletes a queue item's prefetched cache file, if any — called once
+   * it's actually consumed (playEntry()) or if it's removed from the queue
+   * before ever getting its turn (removeFromQueue()). */
+  private cleanupPrefetch(id: number) {
+    const filePath = this.prefetchedFiles.get(id);
+    if (!filePath) return;
+    this.prefetchedFiles.delete(id);
+    rm(filePath, { force: true }).catch(() => {});
+  }
+
+  /**
+   * Streams an ffmpeg-generated (lavfi) audio source — silence or a
+   * synthesized tone — to subscribers for as long as `shouldContinue()`
+   * keeps returning true and `gen` stays current, mirroring playSilence()'s
+   * structure. Used by runSpiseTid() for both the pause window's silence
+   * and the alarm's fallback siren tone (when no admin-uploaded alarm file
+   * exists).
+   */
+  private async streamGeneratedAudio(lavfiArgs: string[], gen: number, shouldContinue: () => boolean): Promise<void> {
+    const ffmpeg = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", ...lavfiArgs, ...AUDIO_ARGS, "pipe:1"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    this.ytdlpProc = null;
+    this.ffmpegProc = ffmpeg;
+    try {
+      const reader = ffmpeg.stdout.getReader();
+      while (true) {
+        if (this.currentGen !== gen || !shouldContinue()) return;
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) this.broadcast(value);
+      }
+    } finally {
+      this.ffmpegProc = null;
+      try {
+        ffmpeg.kill();
+      } catch {
+        // already exited
+      }
     }
   }
 
@@ -1217,6 +1506,21 @@ class WorkFmQueueStream {
 
   private async playEntry(entry: QueueItem, gen: number): Promise<void> {
     if (entry.source === "upload") return this.playUpload(entry, gen);
+
+    // If this track got downloaded ahead of time during a spisetid pause
+    // window (see prefetchQueue()), play straight off that cached file
+    // instead of piping it live through yt-dlp again — same mechanism as
+    // an uploaded mp3, just with the cache file cleaned up afterwards.
+    const prefetchedPath = this.prefetchedFiles.get(entry.id);
+    if (prefetchedPath) {
+      this.prefetchedFiles.delete(entry.id);
+      try {
+        await this.playUpload({ ...entry, diskPath: prefetchedPath }, gen);
+      } finally {
+        rm(prefetchedPath, { force: true }).catch(() => {});
+      }
+      return;
+    }
 
     const ytdlp = Bun.spawn(
       ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
@@ -1451,6 +1755,7 @@ class WorkFmQueueStream {
 
   /** Kills any in-flight yt-dlp/ffmpeg pair — called on process shutdown. */
   stop() {
+    if (this.spiseTidTimer) clearInterval(this.spiseTidTimer);
     try {
       this.ytdlpProc?.kill();
     } catch {
@@ -1473,6 +1778,9 @@ class WorkFmQueueStream {
     this.stop();
     for (const id of [...this.uploadFiles.keys()]) {
       await this.cleanupUpload(id);
+    }
+    for (const id of [...this.prefetchedFiles.keys()]) {
+      this.cleanupPrefetch(id);
     }
     this.queue = [];
   }

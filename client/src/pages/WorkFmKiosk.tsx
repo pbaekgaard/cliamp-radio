@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type WorkFmQueueItem, type WorkFmQueueState } from "../api";
 import { NowPlayingHero } from "../components/NowPlayingHero";
+import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
 
 /** WorkFM's single persistent room slug — matches WORKFM_ROOM_SLUG in
  * WorkFm.tsx / server/lib/workfmRooms.ts. There's only ever this one room. */
@@ -72,6 +73,7 @@ export default function WorkFmKiosk() {
 
   const listenerCount = state.members.length + state.anonymousListeners;
   const upNext = state.queue.slice(0, 5);
+  const spiseTidActive = state.nowPlaying?.special === "spisetid";
 
   if (roomMissing) {
     return (
@@ -82,7 +84,8 @@ export default function WorkFmKiosk() {
   }
 
   return (
-    <div className="kiosk-page">
+    <div className={`kiosk-page${spiseTidActive ? " kiosk-page-spisetid" : ""}`}>
+      <SpiseTidOverlay active={spiseTidActive} />
       <header className="kiosk-header">
         <div className="kiosk-brand">
           <span className="kiosk-live-dot" aria-hidden="true" />

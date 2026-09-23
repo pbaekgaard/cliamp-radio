@@ -7,6 +7,7 @@
   --bg: #05070d;
   --panel: #10141f;
   --accent: #7cf7c4;
+  --accent-rgb: 124, 247, 196;
   --accent-dim: #3ea583;
   --text: #e8ecf3;
   --muted: #8a93a6;
@@ -50,7 +51,7 @@ body,
 }
 
 .globe-card {
-  border: 1px solid rgba(124, 247, 196, 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
   border-radius: 10px;
   background: var(--panel);
   overflow: hidden;
@@ -62,7 +63,7 @@ body,
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(124, 247, 196, 0.12);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -80,7 +81,7 @@ body,
   border-radius: 50%;
   background: var(--accent);
   margin-right: 8px;
-  box-shadow: 0 0 0 0 rgba(124, 247, 196, 0.45);
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.45);
   animation: live-pulse 2s infinite;
 }
 
@@ -92,13 +93,13 @@ body,
 
 @keyframes live-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(124, 247, 196, 0.45);
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.45);
   }
   70% {
-    box-shadow: 0 0 0 8px rgba(124, 247, 196, 0);
+    box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(124, 247, 196, 0);
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
   }
 }
 
@@ -210,14 +211,14 @@ body,
   font-weight: 500;
   font-size: 12px;
   color: var(--muted);
-  background: rgba(124, 247, 196, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border-radius: 999px;
   padding: 2px 10px 2px 8px;
 }
 
 .station-listener-count.live {
   color: var(--accent);
-  background: rgba(124, 247, 196, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .station-listener-count .live-dot {
@@ -317,7 +318,7 @@ body,
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid rgba(124, 247, 196, 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -364,7 +365,7 @@ body,
 
 .stats-bar {
   height: 4px;
-  background: rgba(124, 247, 196, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border-radius: 2px;
   margin-top: 5px;
   overflow: hidden;
@@ -388,7 +389,7 @@ body,
 }
 
 .stats-tiles {
-  border-top: 1px solid rgba(124, 247, 196, 0.12);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.12);
   padding-top: 14px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -410,7 +411,7 @@ body,
 }
 
 .stats-daily {
-  border-top: 1px solid rgba(124, 247, 196, 0.12);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.12);
   padding-top: 14px;
 }
 
@@ -478,7 +479,7 @@ body,
   padding: 14px 24px;
   background: rgba(5, 7, 13, 0.85);
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(124, 247, 196, 0.15);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.15);
 }
 
 .topbar-brand {
@@ -530,17 +531,17 @@ body,
   padding: 10px 18px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 20px rgba(124, 247, 196, 0.4);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
   animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 4px 20px rgba(124, 247, 196, 0.4);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
   }
   50% {
-    box-shadow: 0 4px 28px rgba(124, 247, 196, 0.8);
+    box-shadow: 0 4px 28px rgba(var(--accent-rgb), 0.8);
   }
 }
 
@@ -1000,15 +1001,15 @@ input {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--accent, #7cf7c4);
-  background: rgba(124, 247, 196, 0.14);
-  border: 1px solid rgba(124, 247, 196, 0.35);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: 999px;
   padding: 3px 9px;
   white-space: nowrap;
 }
 
 .workfm-vote-active {
-  background: rgba(124, 247, 196, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent, #7cf7c4);
 }
 
@@ -1113,7 +1114,7 @@ input {
   position: absolute;
   inset: 0;
   width: var(--vote-pct, 0%);
-  background: rgba(124, 247, 196, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
   transition: width 0.3s ease;
   z-index: 0;
 }
@@ -1144,7 +1145,7 @@ input {
 
 .workfm-control-skip.active,
 .workfm-control-repeat.active {
-  border-color: rgba(124, 247, 196, 0.5);
+  border-color: rgba(var(--accent-rgb), 0.5);
   color: var(--accent);
 }
 
@@ -1334,8 +1335,8 @@ input {
 /* The first row is what plays next — a subtle accent tint calls it out
  * without adding any new interactive affordance. */
 .workfm-queue-row:first-child {
-  border-color: rgba(124, 247, 196, 0.3);
-  background: linear-gradient(160deg, rgba(124, 247, 196, 0.08), var(--panel) 60%);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  background: linear-gradient(160deg, rgba(var(--accent-rgb), 0.08), var(--panel) 60%);
 }
 
 .workfm-queue-row-info {
@@ -1626,7 +1627,7 @@ input {
   align-items: center;
   gap: 12px;
   background: var(--panel);
-  border: 1px solid rgba(124, 247, 196, 0.25);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   border-radius: 999px;
   padding: 10px 18px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -1735,8 +1736,8 @@ input {
   flex-direction: column;
   padding: 32px 40px 24px;
   background:
-    radial-gradient(circle at 15% 0%, rgba(124, 247, 196, 0.14), transparent 55%),
-    radial-gradient(circle at 100% 100%, rgba(124, 247, 196, 0.08), transparent 50%),
+    radial-gradient(circle at 15% 0%, rgba(var(--accent-rgb), 0.14), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(var(--accent-rgb), 0.08), transparent 50%),
     var(--bg);
   gap: 28px;
   overflow: hidden;
@@ -1762,20 +1763,20 @@ input {
   height: 12px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 0 rgba(124, 247, 196, 0.6);
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.6);
   animation: kiosk-pulse 2s infinite;
   flex-shrink: 0;
 }
 
 @keyframes kiosk-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(124, 247, 196, 0.55);
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55);
   }
   70% {
-    box-shadow: 0 0 0 12px rgba(124, 247, 196, 0);
+    box-shadow: 0 0 0 12px rgba(var(--accent-rgb), 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(124, 247, 196, 0);
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
   }
 }
 
@@ -1803,8 +1804,8 @@ input {
 }
 
 .kiosk-hero {
-  background: linear-gradient(160deg, rgba(124, 247, 196, 0.1), rgba(255, 255, 255, 0.03));
-  border: 1px solid rgba(124, 247, 196, 0.25);
+  background: linear-gradient(160deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   border-radius: 24px;
   padding: 36px 40px;
   display: flex;
@@ -2075,7 +2076,7 @@ input {
 }
 
 .kiosk-member-chip.kiosk-member-listening {
-  background: rgba(124, 247, 196, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   color: var(--accent);
 }
 
@@ -2089,4 +2090,114 @@ input {
   .kiosk-clock {
     font-size: 22px;
   }
+}
+
+/* --- Spisetid (lunch-break alarm) overlay — shared by /workfm and the
+   kiosk view. Recolors every green accent on the page (buttons, highlights,
+   etc. — all driven off the --accent/--accent-dim custom properties) to red
+   underneath a solid black backdrop full of scrolling "SUUUUUULT" marquee
+   rows while it's active; see SpiseTidOverlay.tsx and
+   server/lib/workfmQueue.ts's runSpiseTid(). --- */
+.workfm-page-spisetid,
+.kiosk-page-spisetid {
+  position: relative;
+  --accent: var(--danger);
+  --accent-rgb: 255, 107, 107;
+  --accent-dim: #b23a3a;
+}
+
+.workfm-page-spisetid > *:not(.spisetid-overlay),
+.kiosk-page-spisetid > *:not(.spisetid-overlay) {
+  transition: filter 0.3s ease;
+}
+
+.spisetid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+
+.spisetid-marquee-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.spisetid-marquee-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  white-space: nowrap;
+  font-size: clamp(28px, 6vw, 72px);
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  color: var(--danger);
+  will-change: transform;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.spisetid-marquee-ltr {
+  animation-name: spisetid-marquee-ltr;
+}
+
+.spisetid-marquee-rtl {
+  animation-name: spisetid-marquee-rtl;
+}
+
+@keyframes spisetid-marquee-ltr {
+  from {
+    transform: translateX(-120vw);
+  }
+  to {
+    transform: translateX(120vw);
+  }
+}
+
+@keyframes spisetid-marquee-rtl {
+  from {
+    transform: translateX(120vw);
+  }
+  to {
+    transform: translateX(-120vw);
+  }
+}
+
+.spisetid-dim-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.spisetid-overlay-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.spisetid-overlay-text {
+  font-size: clamp(48px, 12vw, 140px);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+}
+
+.spisetid-overlay-sub {
+  font-size: clamp(16px, 2.5vw, 26px);
+  font-weight: 600;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }

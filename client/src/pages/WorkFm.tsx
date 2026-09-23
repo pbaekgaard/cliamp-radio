@@ -16,6 +16,7 @@ import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
 import { NowPlayingHero } from "../components/NowPlayingHero";
+import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
 
 function timeAgo(ts: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -815,6 +816,10 @@ function RoomPage({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  // Driven straight off state.nowPlaying (not displayedNowPlaying, which
+  // deliberately lags for audio-sync purposes) so the alarm overlay reacts
+  // the instant the server flips into spisetid, not a few seconds later.
+  const spiseTidActive = state.nowPlaying?.special === "spisetid";
 
   const poll = useCallback(async () => {
     try {
@@ -970,7 +975,8 @@ function RoomPage({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="workfm-page">
+    <div className={`workfm-page${spiseTidActive ? " workfm-page-spisetid" : ""}`}>
+      <SpiseTidOverlay active={spiseTidActive} />
       <div className="workfm-header">
         <div>
           <h1>{state.roomName || "Radio Bækgaard"}</h1>

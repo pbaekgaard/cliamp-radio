@@ -16,13 +16,17 @@ export default function Dashboard() {
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [announcements, setAnnouncements] = useState<WorkFmAnnouncementFile[]>([]);
   const [ads, setAds] = useState<WorkFmAnnouncementFile[]>([]);
+  const [spisetidFiles, setSpisetidFiles] = useState<WorkFmAnnouncementFile[]>([]);
   const [announcementError, setAnnouncementError] = useState<string | null>(null);
   const [uploadingAnnouncement, setUploadingAnnouncement] = useState(false);
   const [uploadingAd, setUploadingAd] = useState(false);
+  const [uploadingSpisetid, setUploadingSpisetid] = useState(false);
   const [addingAdFromYoutube, setAddingAdFromYoutube] = useState(false);
   const [adYoutubeUrl, setAdYoutubeUrl] = useState("");
   const [forcingAd, setForcingAd] = useState(false);
   const [forcingAnnouncement, setForcingAnnouncement] = useState(false);
+  const [forcingSpiseTid, setForcingSpiseTid] = useState(false);
+  const [stoppingSpiseTid, setStoppingSpiseTid] = useState(false);
   const [forceMessage, setForceMessage] = useState<string | null>(null);
   const [history, setHistory] = useState<WorkFmLibraryTrack[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -31,21 +35,23 @@ export default function Dashboard() {
   const [promotingHistoryId, setPromotingHistoryId] = useState<string | null>(null);
   const announcementFileInput = useRef<HTMLInputElement>(null);
   const adFileInput = useRef<HTMLInputElement>(null);
+  const spisetidFileInput = useRef<HTMLInputElement>(null);
 
   async function refresh() {
     setStations(await api.listStations());
   }
 
   async function refreshAnnouncements() {
-    const { announcements, ads } = await api.adminListAnnouncements();
+    const { announcements, ads, spisetid } = await api.adminListAnnouncements();
     setAnnouncements(announcements);
     setAds(ads);
+    setSpisetidFiles(spisetid);
   }
 
-  async function uploadAnnouncementFile(category: "announcement" | "ad", file: File | null | undefined) {
+  async function uploadAnnouncementFile(category: "announcement" | "ad" | "spisetid", file: File | null | undefined) {
     if (!file) return;
     setAnnouncementError(null);
-    const setUploading = category === "ad" ? setUploadingAd : setUploadingAnnouncement;
+    const setUploading = category === "ad" ? setUploadingAd : category === "spisetid" ? setUploadingSpisetid : setUploadingAnnouncement;
     setUploading(true);
     try {
       await api.adminUploadAnnouncement(category, file);
@@ -107,6 +113,32 @@ export default function Dashboard() {
       setForceMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setForcingAnnouncement(false);
+    }
+  }
+
+  async function forceSpiseTid() {
+    setForceMessage(null);
+    setForcingSpiseTid(true);
+    try {
+      await api.adminForceSpiseTid();
+      setForceMessage("Spisetid started — alarm now, pause/prefetch shortly, resuming normal playback after.");
+    } catch (err) {
+      setForceMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setForcingSpiseTid(false);
+    }
+  }
+
+  async function stopSpiseTid() {
+    setForceMessage(null);
+    setStoppingSpiseTid(true);
+    try {
+      await api.adminStopSpiseTid();
+      setForceMessage("Spisetid stopped — normal playback resumes right away.");
+    } catch (err) {
+      setForceMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStoppingSpiseTid(false);
     }
   }
 
@@ -366,6 +398,56 @@ export default function Dashboard() {
             ))}
           </ul>
         </div>
+      </div>
+
+      <h2 className="dashboard-section-title">WorkFM: Spisetid (lunch-break alarm)</h2>
+      <p className="muted">
+        Every weekday at 11:30 Danish time, Radio Bækgaard pauses for lunch: an alarm sounds until 11:40, then the
+        stream stays silent while the request queue is prefetched, and normal playback resumes at 12:00. Upload one or
+        more alarm sounds below (falls back to a synthesized siren if none are set). Use "Force" to preview the whole
+        cycle right now, or "Stop" to end it immediately (whether forced or the real 11:30 schedule).
+      </p>
+      <div className="header-actions">
+        <button className="btn-secondary" disabled={forcingSpiseTid} onClick={forceSpiseTid}>
+          {forcingSpiseTid ? "Forcing…" : "Force spisetid"}
+        </button>
+        <button className="btn-danger" disabled={stoppingSpiseTid} onClick={stopSpiseTid}>
+          {stoppingSpiseTid ? "Stopping…" : "Stop spisetid"}
+        </button>
+      </div>
+      <div className="announcement-section">
+        <h3>Alarm sounds</h3>
+        <div className="header-actions">
+          <input
+            ref={spisetidFileInput}
+            type="file"
+            accept=".mp3,audio/mpeg"
+            className="visually-hidden-file-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              uploadAnnouncementFile("spisetid", file);
+              e.target.value = ""; // allow re-selecting the same file to re-trigger onChange
+            }}
+          />
+          <button
+            className="btn-secondary"
+            disabled={uploadingSpisetid}
+            onClick={() => spisetidFileInput.current?.click()}
+          >
+            {uploadingSpisetid ? "Uploading…" : "Upload"}
+          </button>
+        </div>
+        <ul className="announcement-file-list">
+          {spisetidFiles.length === 0 && <li className="muted">No alarm files uploaded yet — a synthesized siren plays instead.</li>}
+          {spisetidFiles.map((a) => (
+            <li key={a.id}>
+              <span>{a.title}</span>
+              <button className="btn-danger" onClick={() => removeAnnouncementFile(a.id)}>
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
       <h2 className="dashboard-section-title">WorkFM: History</h2>

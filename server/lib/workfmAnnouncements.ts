@@ -13,7 +13,7 @@ import { drainText, extractYouTubeVideoId, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS }
 // tracking needed here).
 // ---------------------------------------------------------------------------
 
-export type AnnouncementCategory = "announcement" | "ad";
+export type AnnouncementCategory = "announcement" | "ad" | "spisetid";
 
 export interface AnnouncementFile {
   id: string;
@@ -77,7 +77,7 @@ export async function saveAnnouncementFile(
   const entry: AnnouncementFile = {
     id,
     category,
-    title: title?.trim() || fallbackTitle || (category === "ad" ? "Advertisement" : "Announcement"),
+    title: title?.trim() || fallbackTitle || (category === "ad" ? "Advertisement" : category === "spisetid" ? "Alarm" : "Announcement"),
     filename,
     uploadedAt: Date.now(),
   };
@@ -149,7 +149,7 @@ export async function saveAnnouncementFromYouTube(
   const entry: AnnouncementFile = {
     id,
     category,
-    title: title?.trim() || rawTitle?.trim() || (category === "ad" ? "Advertisement" : "Announcement"),
+    title: title?.trim() || rawTitle?.trim() || (category === "ad" ? "Advertisement" : category === "spisetid" ? "Alarm" : "Announcement"),
     filename,
     uploadedAt: Date.now(),
   };
@@ -181,7 +181,7 @@ export async function saveAnnouncementFromDisk(
   const entry: AnnouncementFile = {
     id,
     category,
-    title: title?.trim() || (category === "ad" ? "Advertisement" : "Announcement"),
+    title: title?.trim() || (category === "ad" ? "Advertisement" : category === "spisetid" ? "Alarm" : "Announcement"),
     filename,
     uploadedAt: Date.now(),
   };
