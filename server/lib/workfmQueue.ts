@@ -46,6 +46,17 @@ export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata bl
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const AUDIO_BYTES_PER_SEC = 16000; // 128kbps ÷ 8 — matches AUDIO_ARGS's bitrate, used to pace relayPaced()
 const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a track starts playing out
+// How much recent audio is kept around so a *newly connecting* listener can
+// be handed a few seconds' worth all at once (as fast as their connection
+// allows) instead of only ever receiving new bytes at the strict real-time
+// broadcast pace — see subscribe()'s burst-on-connect below. Without this,
+// every "Listen in" press has to wait out however many seconds of live
+// real-time trickle the browser's own decode buffer wants before audio
+// becomes audible, since the server otherwise never sends ahead of the
+// live edge. This also gives fresh connections a cushion against brief
+// network hiccups right after joining, which otherwise show up as an
+// audible drop within the first few seconds.
+const BACKLOG_BYTES = AUDIO_BYTES_PER_SEC * 4; // ~4s
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 // Where tracks get downloaded ahead of time during the spisetid pause
@@ -107,9 +118,9 @@ const AD_BREAK_MAX_FILES = 30;
 // and workfmAnnouncements.ts's "spisetid" category for the admin-uploadable
 // alarm sound(s) (falls back to a synthesized siren tone if none are set).
 const SPISETID_TIMEZONE = "Europe/Copenhagen";
-const SPISETID_START_MIN = 15 * 60 + 30; // 15:30 (TEMP — change back to 11:30 after live demo)
-const SPISETID_ALARM_END_MIN = 15 * 60 + 40; // 15:40 (TEMP — change back to 11:40 after live demo)
-const SPISETID_END_MIN = 16 * 60; // 16:00 (TEMP — change back to 12:00 after live demo)
+const SPISETID_START_MIN = 11 * 60 + 30; // 11:30
+const SPISETID_ALARM_END_MIN = 11 * 60 + 40; // 11:40 — alarm plays 11:30–11:40
+const SPISETID_END_MIN = 12 * 60; // 12:00 — back to normal
 const SPISETID_ALARM_DURATION_MS = (SPISETID_ALARM_END_MIN - SPISETID_START_MIN) * 60 * 1000;
 const SPISETID_TOTAL_DURATION_MS = (SPISETID_END_MIN - SPISETID_START_MIN) * 60 * 1000;
 // How often the schedule is checked — frequent enough that the alarm
@@ -295,6 +306,11 @@ function titleFromFilename(filename: string): { artist: string; title: string } 
 
 class WorkFmQueueStream {
   private subscribers = new Set<Subscriber>();
+  // Rolling window of the most recent broadcast audio (raw, pre-ICY-framing
+  // — each new subscriber gets it re-framed with its own bytesSinceMeta
+  // count in subscribe() below), trimmed to BACKLOG_BYTES in broadcast().
+  private backlogChunks: Uint8Array[] = [];
+  private backlogBytes = 0;
   private queue: QueueItem[] = [];
   private current: QueueItem | null = null;
   // When the current track started playing (ms since epoch, Date.now()) —
@@ -676,6 +692,24 @@ class WorkFmQueueStream {
     return new ReadableStream<Uint8Array>({
       start(controller) {
         sub = { controller, wantsMeta, bytesSinceMeta: 0, lastSentMeta: "", name };
+        // Burst-on-connect: hand over whatever's in the recent backlog
+        // immediately (all at once, not paced), so this listener's audio
+        // element gets several seconds of decode buffer up front instead
+        // of only building it up at the live real-time trickle rate —
+        // see BACKLOG_BYTES' comment for why this matters. Framed through
+        // the exact same ICY-metadata accounting as the live path so
+        // metaint boundaries stay correct for what follows.
+        for (const chunk of self.backlogChunks) {
+          try {
+            if (!sub.wantsMeta) {
+              controller.enqueue(chunk);
+            } else {
+              self.pushWithMeta(sub, chunk);
+            }
+          } catch {
+            break; // controller already closed/errored — subscribers.add() below is skipped implicitly via cancel()
+          }
+        }
         self.subscribers.add(sub);
       },
       cancel() {
@@ -1720,6 +1754,12 @@ class WorkFmQueueStream {
   }
 
   private broadcast(chunk: Uint8Array) {
+    this.backlogChunks.push(chunk);
+    this.backlogBytes += chunk.length;
+    while (this.backlogBytes > BACKLOG_BYTES && this.backlogChunks.length > 1) {
+      const dropped = this.backlogChunks.shift()!;
+      this.backlogBytes -= dropped.length;
+    }
     for (const sub of this.subscribers) {
       try {
         if (!sub.wantsMeta) {
