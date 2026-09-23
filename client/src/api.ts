@@ -286,12 +286,16 @@ export const api = {
   version: () => request<{ version: string }>("/api/version"),
   // Deliberately doesn't use request(): we want the log/output even when the
   // update script fails (non-2xx), instead of throwing it away.
-  updateInstall: async (): Promise<{ ok: boolean; log: string }> => {
+  updateInstall: async (): Promise<{ ok: boolean; log: string; restartRequired: boolean }> => {
     const res = await fetch("/api/update/install", { method: "POST", credentials: "include" });
     try {
       return await res.json();
     } catch {
-      return { ok: false, log: `Server returned ${res.status} ${res.statusText} with no readable output.` };
+      return {
+        ok: false,
+        log: `Server returned ${res.status} ${res.statusText} with no readable output.`,
+        restartRequired: true,
+      };
     }
   },
 

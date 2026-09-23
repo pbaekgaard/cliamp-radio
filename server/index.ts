@@ -694,8 +694,12 @@ const server = Bun.serve({
       if (!requireAuth(req)) return unauthorized();
       const result = await runUpdate();
       // Restart (if applicable) only after this response has been handed
-      // off, so the client actually sees the result instead of a 502.
-      if (result.ok) scheduleServiceRestart();
+      // off, so the client actually sees the result instead of a 502. A
+      // release that only touched client/ doesn't need one at all — see
+      // changedFilesRequireRestart's comment in update.ts — so WorkFM
+      // listeners and anyone else's live stream keep playing right through
+      // it.
+      if (result.ok && result.restartRequired) scheduleServiceRestart();
       return json(result, { status: result.ok ? 200 : 500 });
     }
 

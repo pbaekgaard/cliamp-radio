@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { WorkFmProvider } from "./WorkFmContext";
 import { RadioPlayerProvider } from "./RadioPlayerContext";
@@ -10,6 +10,7 @@ import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
 import WorkFm from "./pages/WorkFm";
+import WorkFmKiosk from "./pages/WorkFmKiosk";
 import Login from "./pages/Login";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -21,16 +22,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const { username, mustChangePassword } = useAuth();
+  const location = useLocation();
+  // The kiosk view is meant to run full-screen, unattended, on a tablet —
+  // none of the site chrome (nav bar, update pill, mini player) makes sense
+  // there.
+  const isKiosk = location.pathname === "/workfm/kiosk_view";
 
   return (
     <>
-      <TopBar />
-      <UpdateBanner />
+      {!isKiosk && <TopBar />}
+      {!isKiosk && <UpdateBanner />}
       {username && mustChangePassword && <ChangePasswordModal />}
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />
         <Route path="/workfm" element={<WorkFm />} />
+        <Route path="/workfm/kiosk_view" element={<WorkFmKiosk />} />
         <Route
           path="/dashboard"
           element={
@@ -40,7 +47,7 @@ function AppRoutes() {
           }
         />
       </Routes>
-      <MiniPlayerBar />
+      {!isKiosk && <MiniPlayerBar />}
     </>
   );
 }

@@ -15,6 +15,7 @@ import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
+import { NowPlayingHero } from "../components/NowPlayingHero";
 
 function timeAgo(ts: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -29,9 +30,10 @@ function timeAgo(ts: number): string {
  * anything else typed into the add-track box (a free-text search query, or
  * a Spotify link, both of which go through the search dropdown instead). */
 function isYouTubeUrl(value: string): boolean {
-  return /^https?:\/\/(www\.|music\.)?(youtube\.com|youtu\.be)\//i.test(value.trim());
+  return /^https?:\/\/(www\.|music\.)?(youtube\.com|youtu\.be)\//i.test(
+    value.trim(),
+  );
 }
-
 
 function formatClock(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -39,26 +41,9 @@ function formatClock(totalSeconds: number): string {
   const minutes = Math.floor((s % 3600) / 60);
   const seconds = s % 60;
   const pad = (n: number) => String(n).padStart(2, "0");
-  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
-}
-
-/** "1:23 / 3:45" progress readout for the now-playing card — ticks locally
- * off `startedAt` (a server timestamp) instead of polling every second, so
- * it stays smooth between the room's regular queue polls. Renders nothing
- * if the track's length isn't known. */
-function NowPlayingClock({ startedAt, durationSec }: { startedAt?: number | null; durationSec?: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  if (!startedAt || !durationSec) return null;
-  const elapsed = Math.min(durationSec, Math.max(0, (now - startedAt) / 1000));
-  return (
-    <div className="muted workfm-now-playing-clock">
-      {formatClock(elapsed)} / {formatClock(durationSec)}
-    </div>
-  );
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${minutes}:${pad(seconds)}`;
 }
 
 /** Inline SVG icons for the vote buttons — plain emoji/glyphs render
@@ -66,7 +51,13 @@ function NowPlayingClock({ startedAt, durationSec }: { startedAt?: number | null
  * installed) across browsers/OSes, so these are drawn directly instead. */
 function SkipIcon() {
   return (
-    <svg className="workfm-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
       <path fill="currentColor" d="M6 5v14l10-7L6 5zm11 0v14h2V5h-2z" />
     </svg>
   );
@@ -74,7 +65,13 @@ function SkipIcon() {
 
 function RepeatIcon() {
   return (
-    <svg className="workfm-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
       <path
         fill="currentColor"
         d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
@@ -83,9 +80,65 @@ function RepeatIcon() {
   );
 }
 
+function HeartIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M12 21s-6.7-4.35-9.3-8.2C1 10.4 1.4 7.4 3.6 5.7c2-1.5 4.6-1.1 6.2.7l2.2 2.4 2.2-2.4c1.6-1.8 4.2-2.2 6.2-.7 2.2 1.7 2.6 4.7.9 7.1C18.7 16.65 12 21 12 21z"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M12 3l5 5h-3v6h-4V8H7l5-5zm-7 14h14v2H5v-2z"
+      />
+    </svg>
+  );
+}
+
 /** Small centered dialog used for both joining a room and creating one.
  * Closes on Escape or a click on the backdrop. */
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -96,10 +149,19 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
   return (
     <div className="workfm-modal-overlay" onClick={onClose}>
-      <div className="workfm-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="workfm-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="workfm-modal-header">
           <h2>{title}</h2>
-          <button className="workfm-modal-close" onClick={onClose} aria-label="Close">
+          <button
+            className="workfm-modal-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
@@ -150,15 +212,25 @@ const PERSON_NAME_NOUNS = [
 /** Rolls a short, silly handle (e.g. "Soggy Raccoon") for anyone who'd
  * rather not think of a name — well within the server's 24-char cap. */
 function generateFunnyPersonName(): string {
-  const adjective = PERSON_NAME_ADJECTIVES[Math.floor(Math.random() * PERSON_NAME_ADJECTIVES.length)];
-  const noun = PERSON_NAME_NOUNS[Math.floor(Math.random() * PERSON_NAME_NOUNS.length)];
+  const adjective =
+    PERSON_NAME_ADJECTIVES[
+      Math.floor(Math.random() * PERSON_NAME_ADJECTIVES.length)
+    ];
+  const noun =
+    PERSON_NAME_NOUNS[Math.floor(Math.random() * PERSON_NAME_NOUNS.length)];
   return `${adjective} ${noun}`;
 }
 
 /** Asks for the visitor's name to join a room already in progress — a
  * single-step modal, shown fresh every time (names aren't remembered
  * across rooms). Cancelling leaves them browsing anonymously. */
-function JoinRoomModal({ onClose, onJoin }: { onClose: () => void; onJoin: (name: string) => Promise<void> }) {
+function JoinRoomModal({
+  onClose,
+  onJoin,
+}: {
+  onClose: () => void;
+  onJoin: (name: string) => Promise<void>;
+}) {
   const [yourName, setYourName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -199,7 +271,11 @@ function JoinRoomModal({ onClose, onJoin }: { onClose: () => void; onJoin: (name
             Cancel
           </button>
           <button className="btn-primary" type="submit" disabled={submitting}>
-            {submitting ? "Joining…" : yourName.trim() ? "Join" : "Generate Random"}
+            {submitting
+              ? "Joining…"
+              : yourName.trim()
+                ? "Join"
+                : "Generate Random"}
           </button>
         </div>
       </form>
@@ -244,7 +320,10 @@ function UploadTrackModal({
     setUploading(true);
     setError(null);
     try {
-      await api.workfmUploadToQueue(slug, file, saveForLater, { title, artist });
+      await api.workfmUploadToQueue(slug, file, saveForLater, {
+        title,
+        artist,
+      });
       onUploaded();
       onClose();
     } catch (err) {
@@ -260,7 +339,12 @@ function UploadTrackModal({
         <label className="workfm-modal-label" htmlFor="workfm-upload-file">
           Choose a file
         </label>
-        <input id="workfm-upload-file" type="file" accept="audio/mpeg,.mp3" onChange={handleFileChange} />
+        <input
+          id="workfm-upload-file"
+          type="file"
+          accept="audio/mpeg,.mp3"
+          onChange={handleFileChange}
+        />
 
         <label className="workfm-modal-label" htmlFor="workfm-upload-title">
           Title
@@ -285,7 +369,11 @@ function UploadTrackModal({
         />
 
         <label className="muted workfm-save-checkbox">
-          <input type="checkbox" checked={saveForLater} onChange={(e) => setSaveForLater(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={saveForLater}
+            onChange={(e) => setSaveForLater(e.target.checked)}
+          />
           Save for 2 months (so it can be requeued later)
         </label>
 
@@ -295,7 +383,11 @@ function UploadTrackModal({
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn-primary" type="submit" disabled={uploading || !file}>
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={uploading || !file}
+          >
             {uploading ? "Uploading…" : "Upload"}
           </button>
         </div>
@@ -326,7 +418,9 @@ function QueueRow({
         <span className="workfm-queue-title">{item.title}</span>
         <span className="workfm-queue-artist">
           {item.artist}
-          {item.source === "upload" && <span className="workfm-upload-badge"> · uploaded</span>}
+          {item.source === "upload" && (
+            <span className="workfm-upload-badge"> · uploaded</span>
+          )}
         </span>
       </div>
       <div className="workfm-queue-row-meta">
@@ -338,13 +432,20 @@ function QueueRow({
             className={`btn-secondary workfm-remove-btn${nextVote.hasVoted ? " workfm-vote-active" : ""}`}
             onClick={() => onVoteNext(item.id)}
             disabled={!name}
-            title={nextVote.hasVoted ? "Remove your vote to bump this to the front" : "Vote to bump this to the front of the queue"}
+            title={
+              nextVote.hasVoted
+                ? "Remove your vote to bump this to the front"
+                : "Vote to bump this to the front of the queue"
+            }
           >
             ↑ Next {nextVote.votes}/{nextVote.total}
           </button>
         )}
         {isMine && (
-          <button className="btn-secondary workfm-remove-btn" onClick={() => onRemove(item.id)}>
+          <button
+            className="btn-secondary workfm-remove-btn"
+            onClick={() => onRemove(item.id)}
+          >
             Remove
           </button>
         )}
@@ -353,7 +454,15 @@ function QueueRow({
   );
 }
 
-function MembersPanel({ members, anonymousListeners }: { members: WorkFmMember[]; anonymousListeners: number }) {
+function MembersPanel({
+  members,
+  anonymousListeners,
+  name,
+}: {
+  members: WorkFmMember[];
+  anonymousListeners: number;
+  name: string | null;
+}) {
   const total = members.length + anonymousListeners;
   return (
     <aside className="workfm-listeners-panel">
@@ -361,7 +470,12 @@ function MembersPanel({ members, anonymousListeners }: { members: WorkFmMember[]
       <ul className="workfm-listeners-list">
         {members.map((m) => (
           <li key={m.name} className="workfm-listener-row">
-            <span>{m.name}</span>
+            <span>
+              {m.name}
+              {name && m.name.toLowerCase() === name.toLowerCase() && (
+                <span className="workfm-you-tag">You</span>
+              )}
+            </span>
             <span className="workfm-listening-badge" title="Listening live">
               🎧 Listening
             </span>
@@ -439,7 +553,11 @@ function ChatPanel({
             placeholder="Say something…"
             disabled={sending}
           />
-          <button className="btn-secondary" type="submit" disabled={sending || !text.trim()}>
+          <button
+            className="btn-secondary"
+            type="submit"
+            disabled={sending || !text.trim()}
+          >
             Send
           </button>
         </form>
@@ -473,8 +591,10 @@ function MostPlayedPanel({
 
   return (
     <aside className="workfm-listeners-panel">
-      <h2 className="workfm-listeners-heading">🔁 Most played songs</h2>
-      <p className="muted workfm-leaderboard-hint">Top 5 most-played songs across every WorkFM room</p>
+      <h2 className="workfm-listeners-heading">Most played songs</h2>
+      <p className="muted workfm-leaderboard-hint">
+        Top 5 most-played songs across every WorkFM room
+      </p>
       <ul className="workfm-library-list">
         {mostPlayed.map((t, i) => (
           <li key={t.libraryId} className="workfm-library-row">
@@ -489,14 +609,20 @@ function MostPlayedPanel({
                 {t.playCount} {t.playCount === 1 ? "play" : "plays"}
               </span>
               {t.available && (
-                <button className="btn-secondary" onClick={() => requeue(t.libraryId)} disabled={!name}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => requeue(t.libraryId)}
+                  disabled={!name}
+                >
                   Requeue
                 </button>
               )}
             </div>
           </li>
         ))}
-        {mostPlayed.length === 0 && <li className="muted">Nothing's played yet.</li>}
+        {mostPlayed.length === 0 && (
+          <li className="muted">Nothing's played yet.</li>
+        )}
       </ul>
     </aside>
   );
@@ -507,7 +633,15 @@ const LIBRARY_TABS: { view: WorkFmLibraryView; label: string }[] = [
   { view: "saved", label: "Saved uploads" },
 ];
 
-function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string | null; onRequeued: () => void }) {
+function LibraryPanel({
+  slug,
+  name,
+  onRequeued,
+}: {
+  slug: string;
+  name: string | null;
+  onRequeued: () => void;
+}) {
   const [view, setView] = useState<WorkFmLibraryView>("history");
   const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
   const [open, setOpen] = useState(true);
@@ -534,7 +668,11 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
 
   const q = query.trim().toLowerCase();
   const filteredTracks = q
-    ? tracks.filter((t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+    ? tracks.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.artist.toLowerCase().includes(q),
+      )
     : tracks;
 
   async function like(id: string) {
@@ -580,7 +718,9 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
           <input
             className="workfm-library-search"
             type="search"
-            placeholder={view === "history" ? "Search history…" : "Search saved uploads…"}
+            placeholder={
+              view === "history" ? "Search history…" : "Search saved uploads…"
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search library"
@@ -601,7 +741,11 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
                     ♥ {t.likes}
                   </button>
                   {t.available && (
-                    <button className="btn-secondary" onClick={() => requeue(t.id)} disabled={!name}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => requeue(t.id)}
+                      disabled={!name}
+                    >
                       Requeue
                     </button>
                   )}
@@ -609,7 +753,9 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
               </li>
             ))}
             {filteredTracks.length === 0 && (
-              <li className="muted">{tracks.length === 0 ? "Nothing here yet." : "No matches."}</li>
+              <li className="muted">
+                {tracks.length === 0 ? "Nothing here yet." : "No matches."}
+              </li>
             )}
           </ul>
         </div>
@@ -619,7 +765,13 @@ function LibraryPanel({ slug, name, onRequeued }: { slug: string; name: string |
 }
 
 function RoomPage({ slug }: { slug: string }) {
-  const { name: identityName, roomSlug, identify, bindRoom, forget } = useWorkFm();
+  const {
+    name: identityName,
+    roomSlug,
+    identify,
+    bindRoom,
+    forget,
+  } = useWorkFm();
   // A session restored on page load (see WorkFmProvider) doesn't know which
   // room it belongs to yet — bind it to this one now that we know it, so a
   // refresh doesn't look like "not joined" and force rejoining. Harmless to
@@ -655,7 +807,11 @@ function RoomPage({ slug }: { slug: string }) {
   // Lags behind state.nowPlaying until it's actually about to be audible —
   // see useSyncedNowPlaying's comment. Used for the "now playing" card
   // instead of state.nowPlaying directly.
-  const displayedNowPlaying = useSyncedNowPlaying(state.nowPlaying, playing, streamUrl);
+  const displayedNowPlaying = useSyncedNowPlaying(
+    state.nowPlaying,
+    playing,
+    streamUrl,
+  );
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -734,7 +890,10 @@ function RoomPage({ slug }: { slug: string }) {
     setSubmitting(true);
     setError(null);
     try {
-      await api.workfmAddToQueue(slug, `https://www.youtube.com/watch?v=${result.videoId}`);
+      await api.workfmAddToQueue(
+        slug,
+        `https://www.youtube.com/watch?v=${result.videoId}`,
+      );
       setUrl("");
       setSearchResults([]);
       setShowResults(false);
@@ -802,7 +961,10 @@ function RoomPage({ slug }: { slug: string }) {
   if (roomMissing) {
     return (
       <div className="workfm-page">
-        <p className="muted">Radio Bækgaard is temporarily unavailable — try refreshing in a moment.</p>
+        <p className="muted">
+          Radio Bækgaard is temporarily unavailable — try refreshing in a
+          moment.
+        </p>
       </div>
     );
   }
@@ -812,18 +974,19 @@ function RoomPage({ slug }: { slug: string }) {
       <div className="workfm-header">
         <div>
           <h1>{state.roomName || "Radio Bækgaard"}</h1>
-          {name ? (
+          {!name && (
             <p className="muted">
-              Signed in as <strong>{name}</strong>
+              Join to request tracks, upload MP3s, chat, like, or vote to skip.
             </p>
-          ) : (
-            <p className="muted">Join to request tracks, upload MP3s, chat, like, or vote to skip.</p>
           )}
         </div>
         <div className="header-actions">
           {name ? (
             <>
-              <button className="btn-secondary" onClick={() => toggle(streamUrl, "Radio Bækgaard")}>
+              <button
+                className="btn-secondary"
+                onClick={() => toggle(streamUrl, "Radio Bækgaard")}
+              >
                 {playing ? "Pause stream" : "▶ Listen in"}
               </button>
               <button className="btn-danger" onClick={handleLeave}>
@@ -831,7 +994,10 @@ function RoomPage({ slug }: { slug: string }) {
               </button>
             </>
           ) : (
-            <button className="btn-primary" onClick={() => setShowJoinModal(true)}>
+            <button
+              className="btn-primary"
+              onClick={() => setShowJoinModal(true)}
+            >
               Join
             </button>
           )}
@@ -851,166 +1017,240 @@ function RoomPage({ slug }: { slug: string }) {
           }}
         />
       )}
-      {showUploadModal && <UploadTrackModal slug={slug} onClose={() => setShowUploadModal(false)} onUploaded={poll} />}
+      {showUploadModal && (
+        <UploadTrackModal
+          slug={slug}
+          onClose={() => setShowUploadModal(false)}
+          onUploaded={poll}
+        />
+      )}
 
-      <div className="workfm-layout">
-        <div className="workfm-main">
-          <div className="workfm-now-playing">
-            <p className="workfm-now-playing-label">Now playing</p>
-            {displayedNowPlaying ? (
-              <div className={`workfm-now-playing-card${displayedNowPlaying.special ? " workfm-now-playing-special" : ""}`}>
-                <div>
-                  <div className="workfm-now-playing-title">{displayedNowPlaying.title}</div>
-                  {!displayedNowPlaying.special && (
-                    <>
-                      <div className="muted">{displayedNowPlaying.artist}</div>
-                      <NowPlayingClock startedAt={displayedNowPlaying.startedAt} durationSec={displayedNowPlaying.durationSec} />
-                      <div className="muted">
-                        requested by <strong>{displayedNowPlaying.addedBy}</strong>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {name && !displayedNowPlaying.special && (
-                  <div className="workfm-now-playing-actions">
+      <div className="workfm-now-playing">
+        <NowPlayingHero
+          item={displayedNowPlaying}
+          emptyHint="Add a video below!"
+          controls={
+            name && displayedNowPlaying ? (
+              <>
+                {!displayedNowPlaying.special && (
+                  <>
                     <button
-                      className={`btn-secondary${displayedNowPlaying.likedByMe ? " workfm-vote-active" : ""}`}
+                      className={`workfm-control-btn workfm-control-like${displayedNowPlaying.likedByMe ? " active" : ""}`}
                       onClick={likeNowPlaying}
                       title="Like this song"
                     >
-                      ♥ {displayedNowPlaying.likes}
+                      <HeartIcon />
+                      <span className="workfm-control-count">
+                        {displayedNowPlaying.likes}
+                      </span>
                     </button>
                     <button
-                      className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
+                      className={`workfm-control-btn workfm-control-skip${state.skipVote.hasVoted ? " active" : ""}`}
                       onClick={skip}
+                      style={
+                        {
+                          "--vote-pct": `${state.skipVote.total > 0 ? (state.skipVote.votes / state.skipVote.total) * 100 : 0}%`,
+                        } as React.CSSProperties
+                      }
                       title={
                         state.skipVote.hasVoted
                           ? `Voted to skip (${state.skipVote.votes}/${state.skipVote.total})`
                           : `Vote to skip (${state.skipVote.votes}/${state.skipVote.total})`
                       }
                     >
-                      <SkipIcon /> {state.skipVote.votes}/{state.skipVote.total}
+                      <SkipIcon />
+                      <span>Skip</span>
+                      <span className="workfm-control-count">
+                        {state.skipVote.votes}/{state.skipVote.total}
+                      </span>
                     </button>
                     <button
-                      className={`btn-secondary${state.repeatVote.armed || state.repeatVote.hasVoted ? " workfm-vote-active" : ""}`}
+                      className={`workfm-control-btn workfm-control-repeat${state.repeatVote.armed || state.repeatVote.hasVoted ? " active" : ""}`}
                       onClick={repeat}
+                      style={
+                        {
+                          "--vote-pct": `${state.repeatVote.total > 0 ? (state.repeatVote.votes / state.repeatVote.total) * 100 : 0}%`,
+                        } as React.CSSProperties
+                      }
                       title={
                         state.repeatVote.hasVoted
                           ? `Voted to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
                           : `Vote to repeat (${state.repeatVote.votes}/${state.repeatVote.total})`
                       }
                     >
-                      <RepeatIcon /> {state.repeatVote.votes}/{state.repeatVote.total}
+                      <RepeatIcon />
+                      <span>Repeat</span>
+                      <span className="workfm-control-count">
+                        {state.repeatVote.votes}/{state.repeatVote.total}
+                      </span>
                     </button>
-                  </div>
+                  </>
                 )}
-                {name && displayedNowPlaying.special === "ad" && (
-                  <div className="workfm-now-playing-actions">
-                    <button
-                      className={`btn-secondary${state.skipVote.hasVoted ? " workfm-vote-active" : ""}`}
-                      onClick={skip}
-                      title={
-                        state.skipVote.hasVoted
-                          ? `Voted to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
-                          : `Vote to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
-                      }
-                    >
-                      <SkipIcon /> Skip ads {state.skipVote.votes}/{state.skipVote.total}
-                    </button>
-                  </div>
+                {displayedNowPlaying.special === "ad" && (
+                  <button
+                    className={`workfm-control-btn workfm-control-skip${state.skipVote.hasVoted ? " active" : ""}`}
+                    onClick={skip}
+                    style={
+                      {
+                        "--vote-pct": `${state.skipVote.total > 0 ? (state.skipVote.votes / state.skipVote.total) * 100 : 0}%`,
+                      } as React.CSSProperties
+                    }
+                    title={
+                      state.skipVote.hasVoted
+                        ? `Voted to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
+                        : `Vote to skip ad break (${state.skipVote.votes}/${state.skipVote.total})`
+                    }
+                  >
+                    <SkipIcon />
+                    <span>Skip ads</span>
+                    <span className="workfm-control-count">
+                      {state.skipVote.votes}/{state.skipVote.total}
+                    </span>
+                  </button>
                 )}
-              </div>
-            ) : (
-              <div className="workfm-now-playing-card muted">Nothing playing yet — add a video below!</div>
-            )}
-            {name && displayedNowPlaying && !displayedNowPlaying.special && state.repeatVote.armed && (
-              <p className="muted workfm-vote-hint">This track will play again when it ends.</p>
-            )}
-          </div>
+              </>
+            ) : null
+          }
+          hint={
+            name &&
+            displayedNowPlaying &&
+            !displayedNowPlaying.special &&
+            state.repeatVote.armed
+              ? "This track will play again when it ends."
+              : null
+          }
+        />
+      </div>
 
+      <div className="workfm-layout">
+        <div className="workfm-main">
           {name && (
             <>
-              <div className="workfm-add-wrap">
-                <form className="workfm-add-form" onSubmit={addToQueue}>
-                  <input
-                    value={url}
-                    onChange={(e) => {
-                      setUrl(e.target.value);
-                      setShowResults(true);
-                    }}
-                    onFocus={() => setShowResults(true)}
-                    onBlur={() => setTimeout(() => setShowResults(false), 150)}
-                    placeholder="Search YouTube, or paste a YouTube/Spotify link…"
-                  />
-                  <button
-                    className="btn-primary"
-                    type="submit"
-                    disabled={submitting || !url.trim() || (!isYouTubeUrl(url) && searchResults.length === 0)}
-                  >
-                    {submitting ? "Adding…" : "Add to queue"}
-                  </button>
-                </form>
-                {showResults && url.trim() && !isYouTubeUrl(url) && (
-                  <div className="workfm-search-results">
-                    {searching && <div className="workfm-search-status muted">Searching…</div>}
-                    {!searching && searchResults.length === 0 && (
-                      <div className="workfm-search-status muted">No results</div>
-                    )}
-                    {searchResults.map((r) => (
-                      <button
-                        key={r.videoId}
-                        type="button"
-                        className="workfm-search-result"
-                        disabled={submitting}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => addFromSearch(r)}
-                      >
-                        {r.thumbnail && <img src={r.thumbnail} alt="" />}
-                        <div className="workfm-search-result-meta">
-                          <div className="workfm-search-result-title">{r.title}</div>
-                          <div className="muted">
-                            {r.uploader ?? "Unknown"}
-                            {typeof r.durationSec === "number" ? ` · ${formatClock(r.durationSec)}` : ""}
-                          </div>
+              <div className="workfm-request-panel">
+                <p className="workfm-request-label">Request a track</p>
+                <div className="workfm-add-wrap">
+                  <form className="workfm-add-form" onSubmit={addToQueue}>
+                    <input
+                      value={url}
+                      onChange={(e) => {
+                        setUrl(e.target.value);
+                        setShowResults(true);
+                      }}
+                      onFocus={() => setShowResults(true)}
+                      onBlur={() =>
+                        setTimeout(() => setShowResults(false), 150)
+                      }
+                      placeholder="Search YouTube, or paste a YouTube/Spotify link…"
+                    />
+                    <button
+                      className="btn-primary"
+                      type="submit"
+                      disabled={
+                        submitting ||
+                        !url.trim() ||
+                        (!isYouTubeUrl(url) && searchResults.length === 0)
+                      }
+                    >
+                      <PlusIcon /> {submitting ? "Adding…" : "Add"}
+                    </button>
+                  </form>
+                  {showResults && url.trim() && !isYouTubeUrl(url) && (
+                    <div className="workfm-search-results">
+                      {searching && (
+                        <div className="workfm-search-status muted">
+                          Searching…
                         </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {error && <div className="error">{error}</div>}
-
-              <div className="workfm-upload-row">
-                <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
-                  Upload an MP3
-                </button>
+                      )}
+                      {!searching && searchResults.length === 0 && (
+                        <div className="workfm-search-status muted">
+                          No results
+                        </div>
+                      )}
+                      {searchResults.map((r) => (
+                        <button
+                          key={r.videoId}
+                          type="button"
+                          className="workfm-search-result"
+                          disabled={submitting}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addFromSearch(r)}
+                        >
+                          {r.thumbnail && <img src={r.thumbnail} alt="" />}
+                          <div className="workfm-search-result-meta">
+                            <div className="workfm-search-result-title">
+                              {r.title}
+                            </div>
+                            <div className="muted">
+                              {r.uploader ?? "Unknown"}
+                              {typeof r.durationSec === "number"
+                                ? ` · ${formatClock(r.durationSec)}`
+                                : ""}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {error && <div className="error">{error}</div>}
+                <div className="workfm-upload-row">
+                  <span className="muted">or</span>
+                  <button
+                    className="workfm-upload-btn"
+                    onClick={() => setShowUploadModal(true)}
+                  >
+                    <UploadIcon /> Upload an MP3
+                  </button>
+                </div>
               </div>
             </>
           )}
 
-          <h2 className="workfm-queue-heading">Up next ({state.queue.length})</h2>
+          <h2 className="workfm-queue-heading">
+            Up next ({state.queue.length})
+          </h2>
           <ul className="workfm-queue-list">
             {state.queue.map((item, i) => (
               <QueueRow
                 key={item.id}
                 item={item}
-                isMine={!!name && item.addedBy.toLowerCase() === name.toLowerCase()}
+                isMine={
+                  !!name && item.addedBy.toLowerCase() === name.toLowerCase()
+                }
                 isFirst={i === 0}
                 name={name}
                 onRemove={remove}
                 onVoteNext={voteNext}
               />
             ))}
-            {state.queue.length === 0 && <li className="muted">The queue is empty — be the first to add a track.</li>}
+            {state.queue.length === 0 && (
+              <li className="muted">
+                The queue is empty — be the first to add a track.
+              </li>
+            )}
           </ul>
 
           <LibraryPanel slug={slug} name={name} onRequeued={poll} />
         </div>
 
         <div className="workfm-sidebar">
-          <MostPlayedPanel mostPlayed={state.mostPlayed} slug={slug} name={name} onRequeued={poll} />
-          <MembersPanel members={state.members} anonymousListeners={state.anonymousListeners} />
-          <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
+          <MostPlayedPanel
+            mostPlayed={state.mostPlayed}
+            slug={slug}
+            name={name}
+            onRequeued={poll}
+          />
+          <MembersPanel
+            members={state.members}
+            anonymousListeners={state.anonymousListeners}
+            name={name}
+          />
+          <ChatPanel
+            slug={slug}
+            messages={state.chat}
+            name={name}
+            onSent={poll}
+          />
         </div>
       </div>
     </div>

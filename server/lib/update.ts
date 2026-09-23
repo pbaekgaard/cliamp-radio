@@ -192,9 +192,45 @@ export async function checkForUpdate(force = false) {
 }
 
 
-export function runUpdate(): Promise<{ ok: boolean; log: string }> {
+/**
+ * Whether upgrading from `fromSha` to `toSha` touched anything that could
+ * possibly require the running process to restart. The client bundle is
+ * served straight off disk on every request (see the static-file handler in
+ * index.ts) with nothing cached in memory, so a release that only touches
+ * `client/` takes effect for every visitor's *next* page load without the
+ * server process itself needing to change at all — meaning WorkFM listeners
+ * (and anyone else's live stream) are never interrupted for a client-only
+ * release. Anything outside `client/` (server code, scripts, systemd units,
+ * ...) conservatively requires a restart, since Bun has already loaded the
+ * old versions of those modules into memory and can't hot-swap them.
+ */
+function changedFilesRequireRestart(fromSha: string, toSha: string): boolean {
+  if (!fromSha || !toSha || fromSha === toSha) return false;
+  try {
+    const out = execFileSync("git", ["diff", "--name-only", fromSha, toSha], {
+      cwd: REPO_ROOT,
+      encoding: "utf-8",
+    });
+    const files = out.split("\n").map((f) => f.trim()).filter(Boolean);
+    if (files.length === 0) return false;
+    return files.some((f) => !f.startsWith("client/"));
+  } catch {
+    // Can't tell what changed (shallow clone, pruned history, ...) — restart
+    // to be safe rather than risk running with mismatched server code.
+    return true;
+  }
+}
+
+export function runUpdate(): Promise<{ ok: boolean; log: string; restartRequired: boolean }> {
   return new Promise((resolve) => {
     const script = path.join(REPO_ROOT, "scripts", "update.sh");
+    let fromSha = "";
+    try {
+      fromSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+    } catch {
+      // Non-fatal — just means we can't compute a diff below and will
+      // conservatively restart.
+    }
     // SKIP_RESTART=1: the script must NOT restart the service itself — that
     // would kill this very process before it can respond to the HTTP
     // request that triggered it. We restart separately, after responding.
@@ -207,7 +243,17 @@ export function runUpdate(): Promise<{ ok: boolean; log: string }> {
     child.stderr.on("data", (d) => (log += d.toString()));
     child.on("close", (code) => {
       cachedRelease = null; // force re-check next time
-      resolve({ ok: code === 0, log });
+      const ok = code === 0;
+      let restartRequired = true;
+      if (ok) {
+        try {
+          const toSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+          restartRequired = changedFilesRequireRestart(fromSha, toSha);
+        } catch {
+          restartRequired = true;
+        }
+      }
+      resolve({ ok, log, restartRequired });
     });
   });
 }

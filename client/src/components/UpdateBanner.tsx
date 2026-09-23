@@ -12,6 +12,11 @@ export default function UpdateBanner() {
   const [installError, setInstallError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [restartCountdown, setRestartCountdown] = useState<number | null>(null);
+  // Tracks whether the *service* is actually bouncing (vs. just reloading
+  // this tab to pick up a client-only build that needed no restart at all)
+  // — the countdown/reload behavior is shared, but the button/status text
+  // shouldn't claim a restart happened when it didn't.
+  const [serviceRestarting, setServiceRestarting] = useState(false);
 
   // Re-show the pill if a newer release shows up after the user dismissed
   // a previous one.
@@ -52,8 +57,18 @@ export default function UpdateBanner() {
     try {
       const res = await api.updateInstall();
       if (res.ok) {
-        setInstallLog(`${res.log}\n==> Service is restarting now — this page will reload automatically.`);
-        setRestartCountdown(3);
+        if (res.restartRequired) {
+          setServiceRestarting(true);
+          setInstallLog(`${res.log}\n==> Service is restarting now — this page will reload automatically.`);
+          setRestartCountdown(3);
+        } else {
+          // Client-only release — nothing to restart, so no interruption to
+          // WorkFM listeners or any other live stream. Just reload this page
+          // to pick up the new build.
+          setServiceRestarting(false);
+          setInstallLog(`${res.log}\n==> Applied without restarting the service — no listeners were interrupted.`);
+          setRestartCountdown(1);
+        }
       } else {
         setInstallLog(res.log);
         setInstallError("Update script failed — see output below.");
@@ -67,7 +82,10 @@ export default function UpdateBanner() {
     }
   }
 
-  const restarting = restartCountdown !== null;
+  // Whether a page reload is pending — true for both a real service
+  // restart and a client-only apply, since either way this tab needs a
+  // fresh load to pick up the new build.
+  const reloading = restartCountdown !== null;
 
   return (
     <>
@@ -75,7 +93,7 @@ export default function UpdateBanner() {
         🔔 Update available: {status.latest?.tagName}
       </button>
       {open && (
-        <div className="modal-backdrop" onClick={() => !installing && !restarting && setOpen(false)}>
+        <div className="modal-backdrop" onClick={() => !installing && !reloading && setOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{status.latest?.name}</h2>
             <p className="muted">
@@ -84,9 +102,7 @@ export default function UpdateBanner() {
             <pre className="release-body">{status.latest?.body}</pre>
             {installError && <p className="error">{installError}</p>}
             {installLog && <pre className="install-log">{installLog}</pre>}
-            {restarting && (
-              <p className="muted restart-message">Reloading in {restartCountdown}…</p>
-            )}
+            {reloading && <p className="muted restart-message">Reloading in {restartCountdown}…</p>}
             <div className="modal-actions">
               <button
                 className="btn-secondary"
@@ -94,12 +110,12 @@ export default function UpdateBanner() {
                   setOpen(false);
                   setDismissed(true);
                 }}
-                disabled={installing || restarting}
+                disabled={installing || reloading}
               >
                 Dismiss
               </button>
-              <button className="btn-primary" onClick={install} disabled={installing || restarting}>
-                {installing ? "Installing…" : restarting ? "Restarting…" : "Install update"}
+              <button className="btn-primary" onClick={install} disabled={installing || reloading}>
+                {installing ? "Installing…" : reloading ? (serviceRestarting ? "Restarting…" : "Applying…") : "Install update"}
               </button>
             </div>
           </div>
