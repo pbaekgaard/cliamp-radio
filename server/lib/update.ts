@@ -200,9 +200,17 @@ export async function checkForUpdate(force = false) {
  * `client/` takes effect for every visitor's *next* page load without the
  * server process itself needing to change at all — meaning WorkFM listeners
  * (and anyone else's live stream) are never interrupted for a client-only
- * release. Anything outside `client/` (server code, scripts, systemd units,
- * ...) conservatively requires a restart, since Bun has already loaded the
- * old versions of those modules into memory and can't hot-swap them.
+ * release.
+ *
+ * The only files Bun actually has loaded into memory (and thus can't
+ * hot-swap) are the server's own runtime source under `server/` — anything
+ * else that might change in a release (README, AGENTS.md, .gitignore,
+ * systemd unit templates, shell scripts under `scripts/` that get re-read
+ * from disk fresh on every invocation, ...) is inert as far as the running
+ * process is concerned, so it's safe to skip a restart for those too.
+ * `server/data/` is excluded even though it's under `server/` since it's
+ * runtime-generated state (uploads, saved credentials, history), never
+ * imported code.
  */
 function changedFilesRequireRestart(fromSha: string, toSha: string): boolean {
   if (!fromSha || !toSha || fromSha === toSha) return false;
@@ -213,7 +221,7 @@ function changedFilesRequireRestart(fromSha: string, toSha: string): boolean {
     });
     const files = out.split("\n").map((f) => f.trim()).filter(Boolean);
     if (files.length === 0) return false;
-    return files.some((f) => !f.startsWith("client/"));
+    return files.some((f) => f.startsWith("server/") && !f.startsWith("server/data/"));
   } catch {
     // Can't tell what changed (shallow clone, pruned history, ...) — restart
     // to be safe rather than risk running with mismatched server code.
