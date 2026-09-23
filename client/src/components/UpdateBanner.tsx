@@ -33,11 +33,13 @@ export default function UpdateBanner() {
     }
   }, [openRequestId]);
 
-  // A simple fixed countdown after a successful install, rather than
-  // polling for the service to come back — the server schedules its own
+  // A simple fixed countdown after a successful *service* restart, rather
+  // than polling for the service to come back — it schedules its own
   // restart shortly after responding, so by the time a short countdown
   // elapses it's reliably back up, without the false starts that come from
-  // trying to detect "down, then up" through a reverse proxy.
+  // trying to detect "down, then up" through a reverse proxy. Client-only
+  // releases never set this — see install() below — so nothing here forces
+  // a reload (and an audio-stream hiccup) on someone who's just listening.
   useEffect(() => {
     if (restartCountdown === null) return;
     if (restartCountdown <= 0) {
@@ -63,11 +65,12 @@ export default function UpdateBanner() {
           setRestartCountdown(3);
         } else {
           // Client-only release — nothing to restart, so no interruption to
-          // WorkFM listeners or any other live stream. Just reload this page
-          // to pick up the new build.
+          // WorkFM listeners or any other live stream. Don't force a reload:
+          // whoever clicked this can keep listening on this very tab for as
+          // long as they like and grab the new visuals next time they
+          // refresh on their own.
           setServiceRestarting(false);
-          setInstallLog(`${res.log}\n==> Applied without restarting the service — no listeners were interrupted.`);
-          setRestartCountdown(1);
+          setInstallLog(`${res.log}\n==> Applied without restarting the service — nothing was interrupted. Refresh whenever you're ready to see the update.`);
         }
       } else {
         setInstallLog(res.log);
@@ -82,10 +85,13 @@ export default function UpdateBanner() {
     }
   }
 
-  // Whether a page reload is pending — true for both a real service
-  // restart and a client-only apply, since either way this tab needs a
-  // fresh load to pick up the new build.
+  // Whether a page reload is pending — only true for a real service
+  // restart; a client-only apply never sets this, so it never forces a
+  // reload (and never interrupts anyone's stream).
   const reloading = restartCountdown !== null;
+  // The update finished applying but (being client-only) isn't forcing a
+  // reload — offer a manual "Refresh now" button instead.
+  const appliedNoRestart = !reloading && installLog !== null && !installError && !installing;
 
   return (
     <>
@@ -112,11 +118,17 @@ export default function UpdateBanner() {
                 }}
                 disabled={installing || reloading}
               >
-                Dismiss
+                {appliedNoRestart ? "Keep listening" : "Dismiss"}
               </button>
-              <button className="btn-primary" onClick={install} disabled={installing || reloading}>
-                {installing ? "Installing…" : reloading ? (serviceRestarting ? "Restarting…" : "Applying…") : "Install update"}
-              </button>
+              {appliedNoRestart ? (
+                <button className="btn-primary" onClick={() => window.location.reload()}>
+                  Refresh now
+                </button>
+              ) : (
+                <button className="btn-primary" onClick={install} disabled={installing || reloading}>
+                  {installing ? "Installing…" : reloading ? (serviceRestarting ? "Restarting…" : "Applying…") : "Install update"}
+                </button>
+              )}
             </div>
           </div>
         </div>
