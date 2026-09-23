@@ -105,7 +105,7 @@ export default function WorkFmKiosk() {
             {upNext.map((item, i) => (
               <UpNextRow key={item.id} item={item} position={i + 1} />
             ))}
-            {upNext.length === 0 && <li className="muted kiosk-queue-empty">Nothing queued</li>}
+            {upNext.length === 0 && <li className="muted kiosk-queue-empty">No requests</li>}
           </ul>
         </section>
       </main>

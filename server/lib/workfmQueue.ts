@@ -51,10 +51,14 @@ const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
 const MAX_CHAT_MESSAGE_LENGTH = 500;
-// Where the queue + chat are persisted to disk so an in-progress room
-// survives a server restart (e.g. from an update — see scripts/update.sh)
-// instead of coming back empty. See restore()/schedulePersist()/flush() below.
-const QUEUE_STATE_PATH = path.join(import.meta.dir, "..", "data", "workfm-queue-state.json");
+// Where chat history is persisted to disk so it survives a server restart
+// (e.g. from an update — see scripts/update.sh) instead of resetting to
+// empty every time. The request/auto-DJ queue itself is intentionally NOT
+// persisted — it's tied to a live ffmpeg/yt-dlp process that a restart
+// necessarily interrupts anyway, so there's nothing meaningful to resume —
+// but chat is just plain data with no such dependency, so it can (and
+// should) survive right through. See loadChatState()/saveChatState() below.
+const CHAT_STATE_PATH = path.join(import.meta.dir, "..", "data", "workfm-chat-state.json");
 // How long a named visitor is considered "in the room" after their last
 // GET /queue poll (see touchPresence()/list() below) before they're
 // considered gone — comfortably longer than the client's ~1.5s poll
@@ -302,6 +306,46 @@ class WorkFmQueueStream {
   // boundary plays one immediately, without waiting for the real interval.
   private forcedAdBreak = false;
   private forcedAnnouncement = false;
+  // Debounce flag for saveChatState() — mirrors workfmLibrary.ts's save()
+  // pattern, so a burst of messages coalesces into one disk write instead
+  // of one per message.
+  private chatSaveQueued = false;
+
+  constructor() {
+    this.loadChatState();
+  }
+
+  /** Loads persisted chat history (see CHAT_STATE_PATH) at startup, so a
+   * server restart — from an update or otherwise — doesn't wipe the room's
+   * conversation. Missing/corrupt file just means a fresh, empty chat. */
+  private loadChatState() {
+    try {
+      const raw = readFileSync(CHAT_STATE_PATH, "utf-8");
+      const parsed = JSON.parse(raw) as { chat: ChatMessage[]; nextChatId: number };
+      if (Array.isArray(parsed.chat)) this.chat = parsed.chat;
+      if (typeof parsed.nextChatId === "number") this.nextChatId = parsed.nextChatId;
+    } catch {
+      // No saved state yet, or it's unreadable — start with empty chat.
+    }
+  }
+
+  /** Debounced write of the current chat history to disk — called after
+   * every new message so an update/restart never loses more than whatever
+   * was in flight at the exact moment of the crash (practically nothing,
+   * since this fires synchronously off the same event as the post). */
+  private saveChatState() {
+    if (this.chatSaveQueued) return;
+    this.chatSaveQueued = true;
+    queueMicrotask(async () => {
+      this.chatSaveQueued = false;
+      try {
+        await mkdir(path.dirname(CHAT_STATE_PATH), { recursive: true });
+        await writeFile(CHAT_STATE_PATH, JSON.stringify({ chat: this.chat, nextChatId: this.nextChatId }));
+      } catch (err) {
+        console.error("[workfm-queue] failed to persist chat:", err);
+      }
+    });
+  }
 
   /** Total ms of actual playback activity since this room was created,
    * excluding any stretches spent asleep (idle, no listeners — see
@@ -540,6 +584,7 @@ class WorkFmQueueStream {
     const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now() };
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    this.saveChatState();
     return message;
   }
 

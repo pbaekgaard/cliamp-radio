@@ -1225,7 +1225,7 @@ function RoomPage({ slug }: { slug: string }) {
             ))}
             {state.queue.length === 0 && (
               <li className="muted">
-                The queue is empty — be the first to add a track.
+                No requests yet — be the first to add a track.
               </li>
             )}
           </ul>
