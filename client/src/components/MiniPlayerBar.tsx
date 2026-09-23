@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useRadioPlayer } from "../RadioPlayerContext";
 
 // A small persistent bar shown whenever a "Tune in"/"Listen in" button is
@@ -7,6 +8,19 @@ import { useRadioPlayer } from "../RadioPlayerContext";
 // than auto-playing on mount).
 export default function MiniPlayerBar() {
   const { nowPlaying, stop, volume, setVolume } = useRadioPlayer();
+  // Remembers the volume to restore when unmuting, since muting itself just
+  // drives volume to 0 (there's no separate "muted" flag to preserve it).
+  const preMuteVolumeRef = useRef(1);
+
+  function toggleMute() {
+    if (volume > 0) {
+      preMuteVolumeRef.current = volume;
+      setVolume(0);
+    } else {
+      setVolume(preMuteVolumeRef.current || 1);
+    }
+  }
+
   if (!nowPlaying) return null;
 
   return (
@@ -16,7 +30,15 @@ export default function MiniPlayerBar() {
       </span>
       <span className="mini-player-label">{nowPlaying.label}</span>
       <span className="mini-player-volume">
-        <span aria-hidden="true">{volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}</span>
+        <button
+          type="button"
+          className="mini-player-mute-btn"
+          onClick={toggleMute}
+          aria-label={volume === 0 ? "Unmute" : "Mute"}
+          title={volume === 0 ? "Unmute" : "Mute"}
+        >
+          <span aria-hidden="true">{volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}</span>
+        </button>
         <input
           type="range"
           className="mini-player-volume-slider"
