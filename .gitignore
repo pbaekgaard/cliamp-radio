@@ -14,3 +14,4 @@ server/data/workfm-library.json
 server/data/workfm-saved-uploads/
 server/data/workfm-announcements/
 server/data/workfm-history-downloads/
+*.db
