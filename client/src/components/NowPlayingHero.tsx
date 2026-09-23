@@ -99,7 +99,13 @@ export function NowPlayingHero({
       <div className="kiosk-hero-title">{item.title}</div>
       <div className="kiosk-hero-artist">{item.artist}</div>
       <div className="kiosk-hero-meta">
-        requested by <strong>{item.addedBy}</strong>
+        {item.addedBy === "Auto DJ" ? (
+          <strong className="kiosk-hero-autodj">Auto DJ</strong>
+        ) : (
+          <>
+            requested by <strong>{item.addedBy}</strong>
+          </>
+        )}
         {item.likes > 0 && <span className="kiosk-hero-likes"> · ♥ {item.likes}</span>}
       </div>
       {duration > 0 && (

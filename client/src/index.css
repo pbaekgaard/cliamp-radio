@@ -1897,6 +1897,10 @@ input {
   font-size: 15px;
 }
 
+.kiosk-hero-autodj {
+  color: var(--accent);
+}
+
 .kiosk-hero-likes {
   color: var(--accent);
 }
