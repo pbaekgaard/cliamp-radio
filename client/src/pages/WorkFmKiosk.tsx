@@ -100,7 +100,7 @@ export default function WorkFmKiosk() {
         <NowPlayingHero item={state.nowPlaying} emptyHint="The queue is empty — add something from /workfm" />
 
         <section className="kiosk-upnext">
-          <h2 className="kiosk-section-heading">Up next</h2>
+          <h2 className="kiosk-section-heading">Requests</h2>
           <ul className="kiosk-queue-list">
             {upNext.map((item, i) => (
               <UpNextRow key={item.id} item={item} position={i + 1} />

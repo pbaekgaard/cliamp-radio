@@ -1207,7 +1207,7 @@ function RoomPage({ slug }: { slug: string }) {
           )}
 
           <h2 className="workfm-queue-heading">
-            Up next ({state.queue.length})
+            Requests ({state.queue.length})
           </h2>
           <ul className="workfm-queue-list">
             {state.queue.map((item, i) => (
