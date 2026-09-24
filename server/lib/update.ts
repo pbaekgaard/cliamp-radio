@@ -260,6 +260,13 @@ export function runUpdate(): Promise<{ ok: boolean; log: string; restartRequired
         } catch {
           restartRequired = true;
         }
+        // A "soft" update (client-only changes) never restarts this process,
+        // so getCurrentVersion()'s process-lifetime cache would otherwise
+        // keep reporting the pre-update tag forever, making the update
+        // banner falsely claim an update is still available. A hard update
+        // restarts the process anyway, which naturally clears this cache,
+        // so resetting it unconditionally here is safe either way.
+        if (!restartRequired) cachedVersion = null;
       }
       resolve({ ok, log, restartRequired });
     });
