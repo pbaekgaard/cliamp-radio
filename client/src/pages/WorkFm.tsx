@@ -135,10 +135,24 @@ function Modal({
   title,
   onClose,
   children,
+  className,
+  hideHeader,
+  overlayClassName,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  /** Extra class on the modal card itself, for variants that need a
+   * different width/padding (e.g. the command-palette-style modals). */
+  className?: string;
+  /** Skips the title bar entirely for modals whose search input already
+   * makes the purpose obvious (Spotify-style command palettes). The close
+   * button still needs to go somewhere, so callers using this render their
+   * own if they want one. */
+  hideHeader?: boolean;
+  /** Extra class on the backdrop, for variants that anchor the card near
+   * the top of the screen instead of dead-center (command palettes). */
+  overlayClassName?: string;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -149,26 +163,49 @@ function Modal({
   }, [onClose]);
 
   return (
-    <div className="workfm-modal-overlay" onClick={onClose}>
+    <div
+      className={`workfm-modal-overlay${overlayClassName ? ` ${overlayClassName}` : ""}`}
+      onClick={onClose}
+    >
       <div
-        className="workfm-modal"
+        className={`workfm-modal${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="workfm-modal-header">
-          <h2>{title}</h2>
-          <button
-            className="workfm-modal-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
+        {!hideHeader && (
+          <div className="workfm-modal-header">
+            <h2>{title}</h2>
+            <button
+              className="workfm-modal-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {children}
       </div>
     </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M10 2a8 8 0 105.29 14.03l4.84 4.84 1.41-1.41-4.84-4.84A8 8 0 0010 2zm-6 8a6 6 0 1112 0 6 6 0 01-12 0z"
+      />
+    </svg>
   );
 }
 
@@ -393,6 +430,284 @@ function UploadTrackModal({
           </button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** Spotify-style "add a song" modal opened with Ctrl+K — a search bar with
+ * live results underneath, mirroring the inline request box's behavior
+ * (type to search YouTube, or paste a YouTube/Spotify link and hit Enter). */
+/** Ctrl+K/"/" command-palette modals: Tab literally types a tab character
+ * into the search box instead of shifting focus between the result "button"
+ * rows, since the search input is really the only control that matters
+ * here (Spotify-style search UIs work the same way). */
+function handleCommandTab(
+  e: React.KeyboardEvent,
+  value: string,
+  setValue: (v: string) => void,
+) {
+  if (e.key !== "Tab") return;
+  e.preventDefault();
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const start = target.selectionStart ?? value.length;
+  const end = target.selectionEnd ?? value.length;
+  const next = value.slice(0, start) + "\t" + value.slice(end);
+  setValue(next);
+  requestAnimationFrame(() => {
+    target.setSelectionRange(start + 1, start + 1);
+  });
+}
+
+function AddTrackModal({
+  slug,
+  onClose,
+  onAdded,
+}: {
+  slug: string;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<WorkFmSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed || isYouTubeUrl(trimmed)) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const id = setTimeout(async () => {
+      try {
+        const { results: found } = await api.workfmSearch(slug, trimmed);
+        if (!cancelled) setResults(found);
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [query, slug]);
+
+  async function addUrl(videoUrl: string) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.workfmAddToQueue(slug, videoUrl);
+      onAdded();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    if (isYouTubeUrl(trimmed)) {
+      await addUrl(trimmed);
+      return;
+    }
+    if (results[0]) await addUrl(`https://www.youtube.com/watch?v=${results[0].videoId}`);
+  }
+
+  return (
+    <Modal
+      title="Add a track"
+      onClose={onClose}
+      className="workfm-command-modal"
+      overlayClassName="workfm-command-overlay"
+      hideHeader
+    >
+      <form
+        className="workfm-command-form"
+        onSubmit={submit}
+        onKeyDown={(e) => handleCommandTab(e, query, setQuery)}
+      >
+        <div className="workfm-command-search">
+          <SearchIcon />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search YouTube, or paste a YouTube/Spotify link…"
+          />
+        </div>
+        {error && <div className="error">{error}</div>}
+        <div className="workfm-command-results">
+          {searching && (
+            <div className="workfm-search-status muted">Searching…</div>
+          )}
+          {!searching &&
+            query.trim() &&
+            !isYouTubeUrl(query) &&
+            results.length === 0 && (
+              <div className="workfm-search-status muted">No results</div>
+            )}
+          {results.map((r) => (
+            <button
+              key={r.videoId}
+              type="button"
+              className="workfm-command-result"
+              disabled={submitting}
+              onClick={() =>
+                addUrl(`https://www.youtube.com/watch?v=${r.videoId}`)
+              }
+            >
+              {r.thumbnail ? (
+                <img src={r.thumbnail} alt="" />
+              ) : (
+                <div className="workfm-command-result-fallback">
+                  <PlusIcon />
+                </div>
+              )}
+              <div className="workfm-search-result-meta">
+                <div className="workfm-search-result-title">{r.title}</div>
+                <div className="muted">
+                  {r.uploader ?? "Unknown"}
+                  {typeof r.durationSec === "number"
+                    ? ` · ${formatClock(r.durationSec)}`
+                    : ""}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** "/" shortcut opens this — a modal search bar over the play history,
+ * so requeuing/liking a past track doesn't require opening the library
+ * panel and scrolling to find it. */
+function HistorySearchModal({
+  slug,
+  name,
+  onClose,
+  onRequeued,
+}: {
+  slug: string;
+  name: string | null;
+  onClose: () => void;
+  onRequeued: () => void;
+}) {
+  const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setTracks(await api.workfmLibrary("history"));
+    } catch {
+      // ignore transient errors
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? tracks.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.artist.toLowerCase().includes(q),
+      )
+    : tracks;
+
+  async function like(id: string) {
+    if (!name) return;
+    try {
+      await api.workfmToggleLike(id);
+      load();
+    } catch {
+      // ignore
+    }
+  }
+
+  async function requeue(id: string) {
+    if (!name) return;
+    setError(null);
+    try {
+      await api.workfmRequeue(slug, id);
+      onRequeued();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <Modal
+      title="Search history"
+      onClose={onClose}
+      className="workfm-command-modal"
+      overlayClassName="workfm-command-overlay"
+      hideHeader
+    >
+      <div
+        className="workfm-command-search"
+        onKeyDown={(e) => handleCommandTab(e, query, setQuery)}
+      >
+        <SearchIcon />
+        <input
+          autoFocus
+          type="search"
+          placeholder="Search history…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search history"
+        />
+      </div>
+      {error && <div className="error">{error}</div>}
+      <ul className="workfm-command-results workfm-command-list">
+        {filtered.map((t) => (
+          <li key={t.id} className="workfm-command-history-row">
+            <div className="workfm-queue-row-info">
+              <span className="workfm-queue-title">{t.title}</span>
+              <span className="workfm-queue-artist">{t.artist}</span>
+            </div>
+            <div className="workfm-library-row-actions">
+              <button
+                className={`btn-secondary${t.likedByMe ? " workfm-vote-active" : ""}`}
+                onClick={() => like(t.id)}
+                disabled={!name}
+              >
+                ♥ {t.likes}
+              </button>
+              {t.available && (
+                <button
+                  className="btn-secondary"
+                  onClick={() => requeue(t.id)}
+                  disabled={!name}
+                >
+                  Requeue
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+        {filtered.length === 0 && (
+          <li className="muted">
+            {tracks.length === 0 ? "Nothing here yet." : "No matches."}
+          </li>
+        )}
+      </ul>
     </Modal>
   );
 }
@@ -802,7 +1117,8 @@ function RoomPage({ slug }: { slug: string }) {
   const [searchResults, setSearchResults] = useState<WorkFmSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
-  const { nowPlaying, toggle, play, stop } = useRadioPlayer();
+  const { nowPlaying, toggle, play, stop, volume, setVolume } =
+    useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
   const playing = nowPlaying?.url === streamUrl;
   // Lags behind state.nowPlaying until it's actually about to be audible —
@@ -816,10 +1132,80 @@ function RoomPage({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showAddTrackModal, setShowAddTrackModal] = useState(false);
+  const [showHistorySearchModal, setShowHistorySearchModal] = useState(false);
   // Driven straight off state.nowPlaying (not displayedNowPlaying, which
   // deliberately lags for audio-sync purposes) so the alarm overlay reacts
   // the instant the server flips into spisetid, not a few seconds later.
   const spiseTidActive = state.nowPlaying?.special === "spisetid";
+
+  // Remembers the volume to restore on unmute — mirrors MiniPlayerBar's own
+  // toggle since muting itself just drives volume to 0 (there's no separate
+  // "muted" flag to preserve it), but this is a fully independent ref so it
+  // doesn't need to reach into that component's state.
+  const preMuteVolumeRef = useRef(1);
+  const toggleMute = useCallback(() => {
+    if (volume > 0) {
+      preMuteVolumeRef.current = volume;
+      setVolume(0);
+    } else {
+      setVolume(preMuteVolumeRef.current || 1);
+    }
+  }, [volume, setVolume]);
+
+  // Keyboard shortcuts: Ctrl/Cmd+K opens the "add a track" modal (Spotify
+  // style), "/" opens a history search modal, and "m" toggles mute. The
+  // latter two are ignored while typing in any field so ordinary typing
+  // (chat, search boxes, etc.) isn't hijacked; Ctrl/Cmd+K is unambiguous
+  // enough to work everywhere.
+  useEffect(() => {
+    function isTypingTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target.isContentEditable
+      );
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      const anyModalOpen =
+        showJoinModal ||
+        showUploadModal ||
+        showAddTrackModal ||
+        showHistorySearchModal;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!anyModalOpen && name) setShowAddTrackModal(true);
+        return;
+      }
+      if (anyModalOpen || isTypingTarget(e.target)) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        setShowHistorySearchModal(true);
+        return;
+      }
+      if (e.key.toLowerCase() === "m") {
+        if (!nowPlaying) return;
+        e.preventDefault();
+        toggleMute();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    name,
+    nowPlaying,
+    showJoinModal,
+    showUploadModal,
+    showAddTrackModal,
+    showHistorySearchModal,
+    toggleMute,
+  ]);
 
   const poll = useCallback(async () => {
     try {
@@ -976,7 +1362,9 @@ function RoomPage({ slug }: { slug: string }) {
 
   return (
     <div className={`workfm-page${spiseTidActive ? " workfm-page-spisetid" : ""}`}>
-      <SpiseTidOverlay active={spiseTidActive} />
+      <SpiseTidOverlay active={spiseTidActive}>
+        <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
+      </SpiseTidOverlay>
       <div className="workfm-header">
         <div>
           <h1>{state.roomName || "Radio Bækgaard"}</h1>
@@ -1028,6 +1416,21 @@ function RoomPage({ slug }: { slug: string }) {
           slug={slug}
           onClose={() => setShowUploadModal(false)}
           onUploaded={poll}
+        />
+      )}
+      {showAddTrackModal && (
+        <AddTrackModal
+          slug={slug}
+          onClose={() => setShowAddTrackModal(false)}
+          onAdded={poll}
+        />
+      )}
+      {showHistorySearchModal && (
+        <HistorySearchModal
+          slug={slug}
+          name={name}
+          onClose={() => setShowHistorySearchModal(false)}
+          onRequeued={poll}
         />
       )}
 

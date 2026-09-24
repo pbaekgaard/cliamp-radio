@@ -61,7 +61,16 @@ const MARQUEE_ROWS = [
  * muted background noise, not a competing focal point), and the crisp,
  * undimmed "SPISETID" centerpiece sits above everything.
  */
-export function SpiseTidOverlay({ active }: { active: boolean }) {
+export function SpiseTidOverlay({
+  active,
+  children,
+}: {
+  active: boolean;
+  /** Rendered below the SPISETID centerpiece — used by the WorkFM room
+   * page to keep chat usable during the lunch break, without giving the
+   * (deliberately chat-less) kiosk display the same treatment. */
+  children?: React.ReactNode;
+}) {
   if (!active) return null;
   return (
     <div className="spisetid-overlay" role="alert" aria-live="assertive">
@@ -84,6 +93,7 @@ export function SpiseTidOverlay({ active }: { active: boolean }) {
       <div className="spisetid-overlay-content">
         <div className="spisetid-overlay-text">SPISETID</div>
         <div className="spisetid-overlay-sub">Radio Bækgaard er på frokostpause</div>
+        {children && <div className="spisetid-overlay-chat">{children}</div>}
       </div>
     </div>
   );

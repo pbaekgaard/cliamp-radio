@@ -1218,6 +1218,152 @@ input {
   font-size: 13px;
 }
 
+/* Spotify-style "add a track" command palette (Ctrl+K) — a borderless
+ * pill search bar up top, and floating result rows with no visible
+ * borders/box, just spacing + a rounded hover highlight. */
+.workfm-command-modal {
+  position: relative;
+  padding: 24px;
+  max-width: 560px;
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.05),
+    var(--panel) 120px
+  );
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
+}
+
+/* Anchors command-palette modals (Ctrl+K, "/") near the top of the screen
+ * instead of dead-center, like Spotify/VS Code/Slack's search popovers —
+ * dead-center placement overlapped the now-playing card and made the
+ * results list grow further down out of easy reach. */
+.workfm-command-overlay {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+@media (max-width: 720px) {
+  .workfm-command-overlay {
+    padding-top: 6vh;
+  }
+}
+
+.workfm-command-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workfm-command-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  transition: border-color 0.15s ease;
+}
+
+.workfm-command-search:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: var(--accent);
+}
+
+.workfm-command-search input {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.workfm-command-search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.workfm-command-results {
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+}
+
+.workfm-command-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: background 0.12s ease;
+}
+
+.workfm-command-result:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.workfm-command-result:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.workfm-command-result img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.workfm-command-result-fallback {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
+}
+
+/* History search modal ("/") reuses the command palette's borderless,
+ * rounded-hover row treatment instead of the library panel's bordered
+ * list rows. */
+.workfm-command-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workfm-command-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background 0.12s ease;
+}
+
+.workfm-command-history-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
 .workfm-search-result {
   display: flex;
   align-items: center;
@@ -2215,4 +2361,23 @@ input {
   color: #fff;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+/* Keeps chat usable during the lunch-break alarm — a compact, readable
+ * panel docked under the SPISETID banner rather than the sidebar's full
+ * 520px-tall version, which would swamp the overlay. */
+.spisetid-overlay-chat {
+  width: min(90vw, 440px);
+  max-height: 38vh;
+}
+
+.spisetid-overlay-chat .workfm-chat-panel {
+  min-height: 0;
+  max-height: 38vh;
+  background: rgba(5, 7, 13, 0.75);
+  border-color: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
 }
