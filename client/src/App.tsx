@@ -10,6 +10,7 @@ import TopBar from "./components/TopBar";
 import UpdateBanner from "./components/UpdateBanner";
 import Dashboard from "./pages/Dashboard";
 import WorkFm from "./pages/WorkFm";
+import WorkFmChat from "./pages/WorkFmChat";
 import WorkFmKiosk from "./pages/WorkFmKiosk";
 import Login from "./pages/Login";
 
@@ -25,18 +26,22 @@ function AppRoutes() {
   const location = useLocation();
   // The kiosk view is meant to run full-screen, unattended, on a tablet —
   // none of the site chrome (nav bar, update pill, mini player) makes sense
-  // there.
+  // there. The standalone chat page is the same deal — it's meant to be a
+  // fullscreen chat-only window, not another place to see the nav/player.
   const isKiosk = location.pathname === "/workfm/kiosk_view";
+  const isChatFullscreen = location.pathname === "/workfm/chat";
+  const hideChrome = isKiosk || isChatFullscreen;
 
   return (
     <>
-      {!isKiosk && <TopBar />}
-      {!isKiosk && <UpdateBanner />}
+      {!hideChrome && <TopBar />}
+      {!hideChrome && <UpdateBanner />}
       {username && mustChangePassword && <ChangePasswordModal />}
       <Routes>
         <Route path="/" element={<ListenersGlobe />} />
         <Route path="/login" element={<Login />} />
         <Route path="/workfm" element={<WorkFm />} />
+        <Route path="/workfm/chat" element={<WorkFmChat />} />
         <Route path="/workfm/kiosk_view" element={<WorkFmKiosk />} />
         <Route
           path="/dashboard"
@@ -47,7 +52,7 @@ function AppRoutes() {
           }
         />
       </Routes>
-      {!isKiosk && <MiniPlayerBar />}
+      {!hideChrome && <MiniPlayerBar />}
     </>
   );
 }

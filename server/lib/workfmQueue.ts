@@ -85,6 +85,7 @@ rm(PREFETCH_DIR, { recursive: true, force: true }).catch(() => {});
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
 const MAX_CHAT_MESSAGE_LENGTH = 500;
+const CHAT_MESSAGE_TTL_MS = 24 * 60 * 60 * 1000; // messages expire 24h after being sent
 // Where chat history is persisted to disk so it survives a server restart
 // (e.g. from an update — see scripts/update.sh) instead of resetting to
 // empty every time. The request/auto-DJ queue itself is intentionally NOT
@@ -439,9 +440,21 @@ class WorkFmQueueStream {
       const parsed = JSON.parse(raw) as { chat: ChatMessage[]; nextChatId: number };
       if (Array.isArray(parsed.chat)) this.chat = parsed.chat;
       if (typeof parsed.nextChatId === "number") this.nextChatId = parsed.nextChatId;
+      this.pruneExpiredChat();
     } catch {
       // No saved state yet, or it's unreadable — start with empty chat.
     }
+  }
+
+  /** Drops any message older than CHAT_MESSAGE_TTL_MS — messages have a
+   * fixed 24h lifetime regardless of how many have been sent since, same
+   * idea as the MAX_CHAT_MESSAGES cap but time-based instead of count-based. */
+  private pruneExpiredChat() {
+    const cutoff = Date.now() - CHAT_MESSAGE_TTL_MS;
+    const before = this.chat.length;
+    if (before > 0 && this.chat[0]!.at >= cutoff) return; // fast path: oldest is still fresh
+    this.chat = this.chat.filter((m) => m.at >= cutoff);
+    if (this.chat.length !== before) this.saveChatState();
   }
 
   /** Debounced write of the current chat history to disk — called after
@@ -656,6 +669,7 @@ class WorkFmQueueStream {
     chat: ChatMessage[];
   } {
     this.touchPresence(viewerName);
+    this.pruneExpiredChat();
     const listeners = this.listenerNames();
     const listening = new Set(listeners);
     const activeMembers = this.activeMemberNames();
@@ -694,6 +708,7 @@ class WorkFmQueueStream {
   /** Posts a chat message from `name`; trims/caps length and rolls off the
    * oldest message once MAX_CHAT_MESSAGES is exceeded. */
   postChatMessage(name: string, text: string): ChatMessage {
+    this.pruneExpiredChat();
     const trimmed = text.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
     if (!trimmed) throw new Error("message can't be empty");
     const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now() };

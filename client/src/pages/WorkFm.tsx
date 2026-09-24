@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   api,
@@ -15,6 +15,8 @@ import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
+import { useChatEmotes, type ChatEmote } from "../lib/chatEmotes";
+import { looksLikeEmoteToken, resolveSevenTvEmoteByName } from "../lib/sevenTv";
 import { NowPlayingHero } from "../components/NowPlayingHero";
 import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
 
@@ -262,7 +264,7 @@ function generateFunnyPersonName(): string {
 /** Asks for the visitor's name to join a room already in progress — a
  * single-step modal, shown fresh every time (names aren't remembered
  * across rooms). Cancelling leaves them browsing anonymously. */
-function JoinRoomModal({
+export function JoinRoomModal({
   onClose,
   onJoin,
 }: {
@@ -712,6 +714,37 @@ function HistorySearchModal({
   );
 }
 
+/** Lists every global keyboard shortcut on this page — opened via the "?"
+ * hint button (or pressing "?" itself), mirroring the common web convention
+ * for a keybinds cheat-sheet. */
+function KeybindsModal({ onClose }: { onClose: () => void }) {
+  const shortcuts: Array<{ keys: string[]; description: string }> = [
+    { keys: ["Ctrl/⌘", "K"], description: "Add a track to the queue" },
+    { keys: ["/"], description: "Search play history" },
+    { keys: ["M"], description: "Mute / unmute" },
+    { keys: ["?"], description: "Show this keybinds list" },
+    { keys: ["Tab"], description: "Autocomplete an emote name (in chat)" },
+    { keys: ["Esc"], description: "Close any open modal" },
+  ];
+
+  return (
+    <Modal title="Keyboard shortcuts" onClose={onClose}>
+      <ul className="keybinds-list">
+        {shortcuts.map((s) => (
+          <li key={s.description}>
+            <span>{s.description}</span>
+            <span>
+              {s.keys.map((k) => (
+                <kbd key={k}>{k}</kbd>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Modal>
+  );
+}
+
 function QueueRow({
   item,
   isMine,
@@ -770,7 +803,7 @@ function QueueRow({
   );
 }
 
-function MembersPanel({
+export function MembersPanel({
   members,
   anonymousListeners,
   name,
@@ -811,25 +844,306 @@ function MembersPanel({
   );
 }
 
-function ChatPanel({
+// Matches a whole token that's a URL, optionally prefixed with "www." (no
+// scheme) — chat messages don't require people to type the full
+// "https://" for a link to become clickable.
+const URL_TOKEN_RE = /^(https?:\/\/\S+|www\.\S+)$/i;
+
+/** Splits a chat message on whitespace and swaps any whole-word token
+ * that's either an emote name (7TV, Twitch, or BTTV global/top charts) or
+ * a URL for, respectively, its image or a clickable link — same convention
+ * every chat client uses. */
+function renderChatText(
+  text: string,
+  emotes: Map<string, ChatEmote> | null
+): React.ReactNode {
+  const parts = text.split(/(\s+)/);
+  return parts.map((part, i) => {
+    const emote = emotes?.get(part);
+    if (emote) {
+      return (
+        <img
+          key={i}
+          src={emote.url}
+          alt={part}
+          title={`${part} (${emoteSourceLabel(emote.source)})`}
+          className="chat-emote"
+          loading="lazy"
+        />
+      );
+    }
+    return <span key={i}>{linkifyToken(part)}</span>;
+  });
+}
+
+/** Trims common trailing punctuation off a token before deciding whether
+ * it's a URL, so "check this out: https://example.com!" still links to
+ * exactly the URL rather than including the trailing "!". */
+function linkifyToken(token: string): React.ReactNode {
+  const match = /^(.*?)([.,!?;:)]*)$/.exec(token);
+  const core = match?.[1] ?? token;
+  const trailing = match?.[2] ?? "";
+  if (!core || !URL_TOKEN_RE.test(core)) return token;
+  const href = core.toLowerCase().startsWith("http") ? core : `https://${core}`;
+  return (
+    <>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
+        {core}
+      </a>
+      {trailing}
+    </>
+  );
+}
+
+function emoteSourceLabel(source: ChatEmote["source"]): string {
+  switch (source) {
+    case "7tv":
+      return "7TV";
+    case "bttv":
+      return "BTTV";
+    case "twitch":
+      return "Twitch";
+  }
+}
+
+/** A small popover of searchable emote buttons (7TV + Twitch global sets)
+ * that inserts the chosen emote's name into the chat box — same idea as
+ * Twitch/Discord's emote picker, just without needing an account/API key
+ * for either source (see lib/sevenTv.ts and lib/twitchEmotes.ts). */
+function EmotePicker({
+  emotes,
+  onPick,
+  onClose,
+}: {
+  emotes: Map<string, ChatEmote> | null;
+  onPick: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const list = emotes ? [...emotes.values()] : [];
+  const filtered = query.trim()
+    ? list.filter((e) =>
+        e.name.toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : list;
+
+  return (
+    <div className="emote-picker">
+      <div className="emote-picker-header">
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search emotes…"
+        />
+        <button
+          type="button"
+          className="emote-picker-close"
+          onClick={onClose}
+          aria-label="Close emote picker"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="emote-picker-grid">
+        {!emotes && <p className="muted">Loading emotes…</p>}
+        {emotes &&
+          filtered.slice(0, 200).map((e) => (
+            <button
+              key={`${e.source}:${e.name}`}
+              type="button"
+              className="emote-picker-item"
+              title={e.name}
+              onClick={() => onPick(e.name)}
+            >
+              <img src={e.url} alt={e.name} loading="lazy" />
+            </button>
+          ))}
+        {emotes && filtered.length === 0 && (
+          <p className="muted">No emotes match "{query}".</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ChatPanel({
   slug,
   messages,
   name,
   onSent,
+  members,
+  anonymousListeners,
+  autoFocus,
 }: {
   slug: string;
   messages: WorkFmChatMessage[];
   name: string | null;
   onSent: () => void;
+  /** Omitted entirely on callers that don't have member data handy — the
+   * "Who's here" toggle just doesn't render in that case. */
+  members?: WorkFmMember[];
+  anonymousListeners?: number;
+  /** Focuses the message input as soon as it's available — used by the
+   * standalone /workfm/chat page, where the chat *is* the whole page. */
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const [showEmotePicker, setShowEmotePicker] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [suggestions, setSuggestions] = useState<ChatEmote[]>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const emotes = useChatEmotes();
+
+  // The standalone /workfm/chat page passes autoFocus so opening it drops
+  // you straight into typing — this only takes effect once `name` is set
+  // (the input doesn't exist at all until joined) and once per mount.
+  useEffect(() => {
+    if (autoFocus && name) inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus, name]);
+
+  // Preloaded charts (7TV/Twitch/BTTV globals + 7TV top/trending) cover the
+  // vast majority of what people actually type, but not every 7TV emote can
+  // realistically be preloaded — any exact emote-shaped name (see
+  // looksLikeEmoteToken) that shows up in chat and isn't already known gets
+  // looked up live and merged in here, so any real 7TV emote works, not
+  // just the couple hundred most popular ones.
+  const [dynamicEmotes, setDynamicEmotes] = useState<Map<string, ChatEmote>>(
+    new Map()
+  );
+  const displayEmotes = useMemo(() => {
+    if (dynamicEmotes.size === 0) return emotes;
+    const merged = new Map(emotes ?? []);
+    for (const [k, v] of dynamicEmotes) if (!merged.has(k)) merged.set(k, v);
+    return merged;
+  }, [emotes, dynamicEmotes]);
 
   useEffect(() => {
+    if (!emotes) return;
+    const candidates = new Set<string>();
+    for (const m of messages) {
+      for (const token of m.text.split(/\s+/)) {
+        if (!token || emotes.has(token) || dynamicEmotes.has(token)) continue;
+        if (looksLikeEmoteToken(token)) candidates.add(token);
+      }
+    }
+    if (candidates.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const name of candidates) {
+        const resolved = await resolveSevenTvEmoteByName(name);
+        if (cancelled || !resolved) continue;
+        setDynamicEmotes((prev) => {
+          if (prev.has(name)) return prev;
+          const next = new Map(prev);
+          next.set(name, { ...resolved, source: "7tv" });
+          return next;
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // dynamicEmotes intentionally excluded — resolveSevenTvEmoteByName has
+    // its own module-level cache, so re-running this on every new message
+    // just skips already-resolved names for free rather than needing this
+    // effect to depend on its own output.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, emotes]);
+
+
+  // Only auto-scroll to the newest message while the user is "pinned" to the
+  // bottom — if they've scrolled up to read older messages, leave the view
+  // alone and let them jump back down with the "show latest" button instead.
+  useEffect(() => {
+    const el = listRef.current;
+    if (el && pinnedToBottom) el.scrollTop = el.scrollHeight;
+  }, [messages, pinnedToBottom]);
+
+  function handleScroll() {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    setPinnedToBottom(atBottom);
+  }
+
+  function scrollToBottom() {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    setPinnedToBottom(true);
+  }
+
+  function insertEmote(emoteName: string) {
+    setText((t) => (t && !t.endsWith(" ") ? `${t} ${emoteName} ` : `${t}${emoteName} `));
+    setShowEmotePicker(false);
+    setSuggestions([]);
+    inputRef.current?.focus();
+  }
+
+  // Finds the partial word right before the caret (e.g. typing "Pew" with
+  // the cursor at the end of it) and, once it's 2+ chars, offers up to 6
+  // emote names starting with it — Twitch/Discord-style tab-completion,
+  // rather than requiring the exact full name or a trip to the picker.
+  function updateSuggestions(value: string, caret: number) {
+    if (!emotes) {
+      setSuggestions([]);
+      return;
+    }
+    const word = /(\S+)$/.exec(value.slice(0, caret))?.[1] ?? "";
+    if (word.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const lower = word.toLowerCase();
+    const matches = [...emotes.values()]
+      .filter((e) => e.name.toLowerCase().startsWith(lower))
+      .sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name))
+      .slice(0, 6);
+    setSuggestions(matches);
+    setSuggestionIndex(0);
+  }
+
+  function applySuggestion(emote: ChatEmote) {
+    const input = inputRef.current;
+    const caret = input?.selectionStart ?? text.length;
+    const before = text.slice(0, caret);
+    const after = text.slice(caret);
+    const wordLen = /(\S+)$/.exec(before)?.[1]?.length ?? 0;
+    const wordStart = caret - wordLen;
+    const newText = `${text.slice(0, wordStart)}${emote.name} ${after}`;
+    setText(newText);
+    setSuggestions([]);
+    const newCaret = wordStart + emote.name.length + 1;
+    // Setting selectionRange has to happen after the value actually
+    // updates in the DOM, which controlled-input re-renders don't
+    // guarantee are done synchronously.
+    requestAnimationFrame(() => {
+      input?.setSelectionRange(newCaret, newCaret);
+      input?.focus();
+    });
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (suggestions.length === 0) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      applySuggestion(suggestions[suggestionIndex]!);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSuggestionIndex((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSuggestionIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (e.key === "Escape") {
+      setSuggestions([]);
+    }
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -838,6 +1152,7 @@ function ChatPanel({
     try {
       await api.workfmPostChat(slug, text.trim());
       setText("");
+      setSuggestions([]);
       // Refresh right away instead of waiting on the next poll tick so the
       // sent message (and anything else that landed meanwhile) shows up
       // immediately rather than up to a few seconds later.
@@ -846,29 +1161,130 @@ function ChatPanel({
       // best-effort — the next poll will resync
     } finally {
       setSending(false);
+      // Sending re-disables/enables the input, which can drop focus — put it
+      // back so the next message can be typed right away without reaching
+      // for the mouse. This has to wait a frame: `setSending(false)` here
+      // and the DOM actually losing its `disabled` attribute aren't
+      // synchronous, and focusing a still-disabled input is a silent no-op.
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }
 
   return (
     <div className="workfm-chat-panel">
-      <h2 className="workfm-listeners-heading">Chat</h2>
-      <ul className="workfm-chat-list" ref={listRef}>
-        {messages.map((m) => (
-          <li key={m.id} className="workfm-chat-row">
-            <strong>{m.name}</strong>: <span>{m.text}</span>
-          </li>
-        ))}
-        {messages.length === 0 && <li className="muted">No messages yet.</li>}
-      </ul>
+      <div className="workfm-chat-header">
+        <h2 className="workfm-listeners-heading">Chat</h2>
+        {members && (
+          <button
+            type="button"
+            className="btn-secondary workfm-members-toggle-btn"
+            onClick={() => setShowMembers((v) => !v)}
+          >
+            👥 Who's here ({members.length + (anonymousListeners ?? 0)})
+          </button>
+        )}
+      </div>
+      {showMembers && members && (
+        <div className="workfm-members-popover-wrap">
+          <button
+            type="button"
+            className="workfm-members-popover-close"
+            aria-label="Close"
+            onClick={() => setShowMembers(false)}
+          >
+            ✕
+          </button>
+          <MembersPanel
+            members={members}
+            anonymousListeners={anonymousListeners ?? 0}
+            name={name}
+          />
+        </div>
+      )}
+      <div className="workfm-chat-list-wrap">
+        <ul
+          className="workfm-chat-list"
+          ref={listRef}
+          onScroll={handleScroll}
+        >
+          {messages.map((m) => (
+            <li key={m.id} className="workfm-chat-row">
+              <strong>{m.name}</strong>: <span>{renderChatText(m.text, displayEmotes)}</span>
+            </li>
+          ))}
+          {messages.length === 0 && (
+            <li className="muted">No messages yet.</li>
+          )}
+        </ul>
+        {!pinnedToBottom && (
+          <button
+            type="button"
+            className="workfm-chat-jump-btn"
+            onClick={scrollToBottom}
+          >
+            ↓ Show latest messages
+          </button>
+        )}
+      </div>
       {name ? (
         <form className="workfm-chat-form" onSubmit={send}>
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            maxLength={500}
-            placeholder="Say something…"
-            disabled={sending}
-          />
+          <div className="workfm-chat-input-wrap">
+            {showEmotePicker && (
+              <EmotePicker
+                emotes={emotes}
+                onPick={insertEmote}
+                onClose={() => setShowEmotePicker(false)}
+              />
+            )}
+            {!showEmotePicker && suggestions.length > 0 && (
+              <ul className="emote-suggest-list">
+                {suggestions.map((s, i) => (
+                  <li key={`${s.source}:${s.name}`}>
+                    <button
+                      type="button"
+                      className={
+                        i === suggestionIndex
+                          ? "emote-suggest-item active"
+                          : "emote-suggest-item"
+                      }
+                      // Prevents the input from losing focus on click, which
+                      // would otherwise fire before onClick and dismiss the
+                      // list before the pick registers.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applySuggestion(s)}
+                    >
+                      <img src={s.url} alt="" />
+                      <span>{s.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input
+              ref={inputRef}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                updateSuggestions(
+                  e.target.value,
+                  e.target.selectionStart ?? e.target.value.length
+                );
+              }}
+              onKeyDown={handleInputKeyDown}
+              maxLength={500}
+              placeholder="Say something…"
+              disabled={sending}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-secondary workfm-emote-toggle-btn"
+            title="Emotes"
+            aria-label="Open emote picker"
+            onClick={() => setShowEmotePicker((v) => !v)}
+          >
+            😊
+          </button>
           <button
             className="btn-secondary"
             type="submit"
@@ -1134,6 +1550,7 @@ function RoomPage({ slug }: { slug: string }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
   const [showHistorySearchModal, setShowHistorySearchModal] = useState(false);
+  const [showKeybindsModal, setShowKeybindsModal] = useState(false);
   // Driven straight off state.nowPlaying (not displayedNowPlaying, which
   // deliberately lags for audio-sync purposes) so the alarm overlay reacts
   // the instant the server flips into spisetid, not a few seconds later.
@@ -1154,10 +1571,10 @@ function RoomPage({ slug }: { slug: string }) {
   }, [volume, setVolume]);
 
   // Keyboard shortcuts: Ctrl/Cmd+K opens the "add a track" modal (Spotify
-  // style), "/" opens a history search modal, and "m" toggles mute. The
-  // latter two are ignored while typing in any field so ordinary typing
-  // (chat, search boxes, etc.) isn't hijacked; Ctrl/Cmd+K is unambiguous
-  // enough to work everywhere.
+  // style), "/" opens a history search modal, "m" toggles mute, and "?"
+  // opens a modal listing all of these. The latter three are ignored while
+  // typing in any field so ordinary typing (chat, search boxes, etc.) isn't
+  // hijacked; Ctrl/Cmd+K is unambiguous enough to work everywhere.
   useEffect(() => {
     function isTypingTarget(target: EventTarget | null): boolean {
       if (!(target instanceof HTMLElement)) return false;
@@ -1175,7 +1592,8 @@ function RoomPage({ slug }: { slug: string }) {
         showJoinModal ||
         showUploadModal ||
         showAddTrackModal ||
-        showHistorySearchModal;
+        showHistorySearchModal ||
+        showKeybindsModal;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -1186,6 +1604,11 @@ function RoomPage({ slug }: { slug: string }) {
       if (e.key === "/") {
         e.preventDefault();
         setShowHistorySearchModal(true);
+        return;
+      }
+      if (e.key === "?") {
+        e.preventDefault();
+        setShowKeybindsModal(true);
         return;
       }
       if (e.key.toLowerCase() === "m") {
@@ -1204,6 +1627,7 @@ function RoomPage({ slug }: { slug: string }) {
     showUploadModal,
     showAddTrackModal,
     showHistorySearchModal,
+    showKeybindsModal,
     toggleMute,
   ]);
 
@@ -1363,7 +1787,7 @@ function RoomPage({ slug }: { slug: string }) {
   return (
     <div className={`workfm-page${spiseTidActive ? " workfm-page-spisetid" : ""}`}>
       <SpiseTidOverlay active={spiseTidActive}>
-        <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} />
+        <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} members={state.members} anonymousListeners={state.anonymousListeners} />
       </SpiseTidOverlay>
       <div className="workfm-header">
         <div>
@@ -1433,7 +1857,11 @@ function RoomPage({ slug }: { slug: string }) {
           onRequeued={poll}
         />
       )}
+      {showKeybindsModal && (
+        <KeybindsModal onClose={() => setShowKeybindsModal(false)} />
+      )}
 
+      <div className="workfm-now-playing-row">
       <div className="workfm-now-playing">
         <NowPlayingHero
           item={displayedNowPlaying}
@@ -1528,6 +1956,17 @@ function RoomPage({ slug }: { slug: string }) {
               : null
           }
         />
+      </div>
+      <div className="workfm-now-playing-side">
+        <ChatPanel
+          slug={slug}
+          messages={state.chat}
+          name={name}
+          onSent={poll}
+          members={state.members}
+          anonymousListeners={state.anonymousListeners}
+        />
+      </div>
       </div>
 
       <div className="workfm-layout">
@@ -1648,26 +2087,25 @@ function RoomPage({ slug }: { slug: string }) {
             name={name}
             onRequeued={poll}
           />
-          <MembersPanel
-            members={state.members}
-            anonymousListeners={state.anonymousListeners}
-            name={name}
-          />
-          <ChatPanel
-            slug={slug}
-            messages={state.chat}
-            name={name}
-            onSent={poll}
-          />
         </div>
       </div>
+
+      <button
+        type="button"
+        className="keybinds-hint-btn"
+        title="Keyboard shortcuts"
+        aria-label="Show keyboard shortcuts"
+        onClick={() => setShowKeybindsModal(true)}
+      >
+        ?
+      </button>
     </div>
   );
 }
 
 /** WorkFM's single persistent room slug — matches WORKFM_ROOM_SLUG on the
  * server (see server/lib/workfmRooms.ts). There's only ever this one room. */
-const WORKFM_ROOM_SLUG = "workfm";
+export const WORKFM_ROOM_SLUG = "workfm";
 
 export default function WorkFm() {
   const { loading } = useWorkFm();
