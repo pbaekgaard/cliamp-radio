@@ -74,6 +74,75 @@ const EXACT_SEARCH_QUERY = `
   }
 `;
 
+const SEARCH_QUERY = `
+  query EmoteLiveSearch($query: String!, $perPage: Int!) {
+    emotes {
+      search(
+        query: $query
+        tags: { tags: [], match: ANY }
+        sort: { sortBy: TOP_ALL_TIME, order: DESCENDING }
+        filters: {}
+        page: 1
+        perPage: $perPage
+      ) {
+        items {
+          id
+          defaultName
+          images { url mime scale frameCount }
+        }
+      }
+    }
+  }
+`;
+
+const liveSearchCache = new Map<string, SevenTvEmote[]>();
+
+/** Live text-search against 7TV's full emote catalog (hundreds of
+ * thousands of user/channel emotes — well beyond what's preloaded by
+ * getSevenTvEmotes()) — used to back the emote picker's search box and
+ * chat-box autocomplete so *any* 7TV emote can be found by name, not just
+ * the couple hundred most popular ones. Results are cached per query
+ * string for the rest of the page's life. */
+export async function searchSevenTvEmotesLive(
+  query: string,
+  perPage = 24
+): Promise<SevenTvEmote[]> {
+  const key = query.toLowerCase();
+  const cached = liveSearchCache.get(key);
+  if (cached) return cached;
+  try {
+    const res = await fetch(V4_GQL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operationName: "EmoteLiveSearch",
+        query: SEARCH_QUERY,
+        variables: { query, perPage },
+      }),
+    });
+    if (!res.ok) throw new Error(`7tv search failed: ${res.status}`);
+    const body = (await res.json()) as {
+      data?: { emotes?: { search?: { items?: V4Emote[] } } };
+    };
+    const items = body.data?.emotes?.search?.items ?? [];
+    const out: SevenTvEmote[] = [];
+    for (const raw of items) {
+      const image = v4BestImage(raw.images);
+      if (!image) continue;
+      out.push({
+        id: raw.id,
+        name: raw.defaultName,
+        animated: image.frameCount > 1,
+        url: image.url,
+      });
+    }
+    liveSearchCache.set(key, out);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 const CACHE_KEY = "sevenTvEmotesV2";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — emote sets rarely change
 

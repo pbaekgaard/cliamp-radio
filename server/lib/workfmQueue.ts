@@ -11,6 +11,7 @@ import {
   type AnnouncementCategory,
   type AnnouncementFile,
 } from "./workfmAnnouncements";
+import { getColorForName } from "./workfmColors";
 
 // ---------------------------------------------------------------------------
 // WorkFM: an always-on radio queue engine with two queues layered on top of
@@ -229,6 +230,25 @@ interface ChatMessage {
   name: string;
   text: string;
   at: number;
+  /** Sender's chat name color at the time they posted (see
+   * workfmColors.ts) — baked in per-message, Twitch-style, so a later
+   * color change doesn't repaint history. */
+  color: string;
+  /** Set (instead of a real sender) for an automatic marker dropped into
+   * the chat log — either "song" (a real track just started, see
+   * pushSongChangeChatMarker) or "rename" (someone changed their display
+   * name, see pushRenameChatMarker). Not a real message — clients should
+   * render it as a dimmed, differently-styled divider rather than a chat
+   * bubble. Older persisted messages may still have the legacy `true`
+   * value from before "song"/"rename" were distinguished — treat that as
+   * "song" for backwards compatibility. */
+  system?: boolean | "song" | "rename";
+  /** The sender's stable per-session identity id (see
+   * workfmIdentity.ts) — *not* their display name, which anyone can
+   * change or collide with someone else's. Used solely to find "my past
+   * messages" on rename (see renameChatAuthor); never shown to clients as
+   * anything meaningful on its own. Absent for system markers. */
+  authorId?: string;
 }
 
 interface Subscriber {
@@ -438,7 +458,12 @@ class WorkFmQueueStream {
     try {
       const raw = readFileSync(CHAT_STATE_PATH, "utf-8");
       const parsed = JSON.parse(raw) as { chat: ChatMessage[]; nextChatId: number };
-      if (Array.isArray(parsed.chat)) this.chat = parsed.chat;
+      if (Array.isArray(parsed.chat)) {
+        // Old persisted messages predate per-message colors — backfill
+        // them from each sender's current color rather than leaving
+        // `color` undefined.
+        this.chat = parsed.chat.map((m) => (m.color ? m : { ...m, color: getColorForName(m.name) }));
+      }
       if (typeof parsed.nextChatId === "number") this.nextChatId = parsed.nextChatId;
       this.pruneExpiredChat();
     } catch {
@@ -661,7 +686,7 @@ class WorkFmQueueStream {
     queue: (QueueItem & { likes: number; likedByMe: boolean; nextVote: { votes: number; total: number; hasVoted: boolean } })[];
     listeners: string[];
     anonymousListeners: number;
-    members: { name: string; listening: boolean }[];
+    members: { name: string; listening: boolean; color: string }[];
     leaderboard: ReturnType<WorkFmQueueStream["roomLeaderboard"]>;
     mostPlayed: ReturnType<WorkFmQueueStream["roomMostPlayed"]>;
     skipVote: { votes: number; total: number; hasVoted: boolean };
@@ -673,7 +698,7 @@ class WorkFmQueueStream {
     const listeners = this.listenerNames();
     const listening = new Set(listeners);
     const activeMembers = this.activeMemberNames();
-    const members = activeMembers.map((name) => ({ name, listening: listening.has(name) }));
+    const members = activeMembers.map((name) => ({ name, listening: listening.has(name), color: getColorForName(name) }));
     return {
       nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
       // Same defensive filter as status's queueLength above — auto-DJ picks
@@ -706,16 +731,65 @@ class WorkFmQueueStream {
 
 
   /** Posts a chat message from `name`; trims/caps length and rolls off the
-   * oldest message once MAX_CHAT_MESSAGES is exceeded. */
-  postChatMessage(name: string, text: string): ChatMessage {
+   * oldest message once MAX_CHAT_MESSAGES is exceeded. `authorId` (the
+   * sender's stable per-session identity, not their display name) is
+   * stamped on so a later rename can find and update this message — see
+   * renameChatAuthor(). */
+  postChatMessage(name: string, text: string, authorId?: string): ChatMessage {
     this.pruneExpiredChat();
     const trimmed = text.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
     if (!trimmed) throw new Error("message can't be empty");
-    const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now() };
+    const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now(), color: getColorForName(name), authorId };
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
     this.saveChatState();
     return message;
+  }
+
+  /** Updates the display name on every past chat message posted under
+   * `authorId` (their stable per-session identity, not the display name
+   * itself) to `newName` — called on rename so someone's history reads
+   * consistently under whichever name they're using now, without trusting
+   * the old *or* new display name (which anyone could otherwise spoof to
+   * rewrite someone else's messages by renaming to match their name, then
+   * renaming again). No-op for messages with no authorId (posted before
+   * this existed) or system markers (which have no author at all). */
+  renameChatAuthor(authorId: string, newName: string): void {
+    if (!authorId) return;
+    let changed = false;
+    for (const message of this.chat) {
+      if (message.authorId === authorId && message.name !== newName) {
+        message.name = newName;
+        changed = true;
+      }
+    }
+    if (changed) this.saveChatState();
+  }
+
+  /** Drops an automatic "now playing: X" marker into the chat log — see
+   * ChatMessage.system. Called whenever a real (non-special) track starts,
+   * so it's easy to scroll back through chat and see which messages landed
+   * during which song. */
+  private pushSongChangeChatMarker(item: QueueItem) {
+    this.pruneExpiredChat();
+    const text = `${item.title} — ${item.artist}`;
+    const message: ChatMessage = { id: this.nextChatId++, name: "", text, at: Date.now(), color: "", system: "song" };
+    this.chat.push(message);
+    if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    this.saveChatState();
+  }
+
+  /** Drops an automatic "X changed name to Y" marker into the chat log —
+   * see ChatMessage.system. Called right after renameChatAuthor() so it's
+   * clear, scrolling back, which messages under the new name actually
+   * belonged to the old one. */
+  pushRenameChatMarker(oldName: string, newName: string) {
+    this.pruneExpiredChat();
+    const text = `${oldName} changed name to ${newName}`;
+    const message: ChatMessage = { id: this.nextChatId++, name: "", text, at: Date.now(), color: "", system: "rename" };
+    this.chat.push(message);
+    if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    this.saveChatState();
   }
 
   /** Starts the perpetual playback loop the first time it's called; safe to call repeatedly. */
@@ -1444,6 +1518,7 @@ class WorkFmQueueStream {
         title: item.title,
         addedBy: item.addedBy,
       });
+      this.pushSongChangeChatMarker(item);
       const gen = ++this.currentGen;
 
       // Whatever's genuinely up next (a real request, or — if the request
@@ -1956,6 +2031,7 @@ class WorkFmQueueStream {
       title: upcoming.title,
       addedBy: upcoming.addedBy,
     });
+    this.pushSongChangeChatMarker(upcoming);
     // Consumed either way from here on — it's already "now playing".
     this.prefetchedFiles.delete(upcoming.id);
 

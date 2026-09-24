@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
-import { api, type WorkFmQueueItem, type WorkFmQueueState } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, type WorkFmChatMessage, type WorkFmQueueItem, type WorkFmQueueState } from "../api";
 import { NowPlayingHero } from "../components/NowPlayingHero";
 import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
+import { useChatEmotes } from "../lib/chatEmotes";
+import { renderChatText } from "./WorkFm";
 
 /** WorkFM's single persistent room slug — matches WORKFM_ROOM_SLUG in
  * WorkFm.tsx / server/lib/workfmRooms.ts. There's only ever this one room. */
@@ -42,6 +44,41 @@ function UpNextRow({ item, position }: { item: WorkFmQueueItem; position: number
       </div>
       {!item.special && <span className="kiosk-queue-by muted">{item.addedBy}</span>}
     </li>
+  );
+}
+
+/** Read-only, always-scrolled-to-bottom chat feed for the kiosk — the
+ * kiosk has no keyboard/name, so this just follows along with whatever's
+ * being said in the room, same rendering (emotes, links) as the real chat
+ * panel on /workfm. */
+function KioskChat({ messages }: { messages: WorkFmChatMessage[] }) {
+  const emotes = useChatEmotes();
+  const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  return (
+    <aside className="kiosk-chat">
+      <h2 className="kiosk-section-heading">Chat</h2>
+      <ul className="kiosk-chat-list" ref={listRef}>
+        {messages.map((m) =>
+          m.system ? (
+            <li key={m.id} className="kiosk-chat-row kiosk-chat-row-system">
+              <span>{m.text}</span>
+            </li>
+          ) : (
+            <li key={m.id} className="kiosk-chat-row">
+              <span className="kiosk-chat-name" style={{ color: m.color }}>{m.name.toLowerCase()}</span>
+              <span>{renderChatText(m.text, emotes)}</span>
+            </li>
+          )
+        )}
+        {messages.length === 0 && <li className="muted kiosk-chat-empty">No messages yet.</li>}
+      </ul>
+    </aside>
   );
 }
 
@@ -100,17 +137,21 @@ export default function WorkFmKiosk() {
       </header>
 
       <main className="kiosk-body">
-        <NowPlayingHero item={state.nowPlaying} emptyHint="The queue is empty — add something from /workfm" />
+        <div className="kiosk-main-col">
+          <NowPlayingHero item={state.nowPlaying} emptyHint="The queue is empty — add something from /workfm" />
 
-        <section className="kiosk-upnext">
-          <h2 className="kiosk-section-heading">Requests</h2>
-          <ul className="kiosk-queue-list">
-            {upNext.map((item, i) => (
-              <UpNextRow key={item.id} item={item} position={i + 1} />
-            ))}
-            {upNext.length === 0 && <li className="muted kiosk-queue-empty">No requests</li>}
-          </ul>
-        </section>
+          <section className="kiosk-upnext">
+            <h2 className="kiosk-section-heading">Requests</h2>
+            <ul className="kiosk-queue-list">
+              {upNext.map((item, i) => (
+                <UpNextRow key={item.id} item={item} position={i + 1} />
+              ))}
+              {upNext.length === 0 && <li className="muted kiosk-queue-empty">No requests</li>}
+            </ul>
+          </section>
+        </div>
+
+        <KioskChat messages={state.chat} />
       </main>
 
       <footer className="kiosk-footer">

@@ -124,6 +124,14 @@ export interface WorkFmChatMessage {
   name: string;
   text: string;
   at: number;
+  /** Sender's chat name color at the time they posted — see
+   * server/lib/workfmColors.ts. */
+  color: string;
+  /** Set for an automatic marker rather than a real chat message — "song"
+   * for a track-change divider, "rename" for a display-name-change one.
+   * Render as a dimmed divider, not a chat bubble. Legacy `true` (from
+   * before "song"/"rename" existed) means "song". */
+  system?: boolean | "song" | "rename";
 }
 
 export interface WorkFmSkipVoteState {
@@ -150,6 +158,8 @@ export interface WorkFmMember {
   /** Whether this person is currently connected to the audio stream, as
    * opposed to just having the room page open. */
   listening: boolean;
+  /** Chat name color — see server/lib/workfmColors.ts. */
+  color: string;
 }
 
 export interface WorkFmLeaderboardEntry {
@@ -303,8 +313,9 @@ export const api = {
 
   // --- WorkFM ---
   workfmIdentify: (name: string) => request<{ name: string }>("/api/workfm/identify", { method: "POST", body: JSON.stringify({ name }) }),
-  workfmMe: () => request<{ name: string }>("/api/workfm/me"),
+  workfmMe: () => request<{ name: string; color: string }>("/api/workfm/me"),
   workfmLogout: () => request("/api/workfm/logout", { method: "POST" }),
+  workfmSetColor: (color: string) => request<{ color: string }>("/api/workfm/color", { method: "POST", body: JSON.stringify({ color }) }),
   workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),
   workfmAddToQueue: (slug: string, url: string) =>
     request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue`, { method: "POST", body: JSON.stringify({ url }) }),

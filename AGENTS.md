@@ -11,4 +11,8 @@ Standing rules for GitHub Copilot CLI (and other AI agents) working in this repo
 
 - When the user says something like "also, do this" or "finally, this" while I'm already mid-task, treat it as adding to the queue of work, not as a request to stop. Note it down, keep working on the current task, and pick up the new one afterward — unless they explicitly say to drop what I'm doing.
 
-<!-- Add more standing instructions below as they come up. -->
+## Specific Task Instructions
+
+### Visual changes
+
+- When the user asks for changes that will do any visual changes. Spin up the local server, and provide a link to the live reload page only of whatever page we are working on. so he can follow whats going on and verify!

@@ -9,16 +9,29 @@ export default function TopBar() {
   // doesn't need the site-wide bar duplicating that on top of it.
   if (location.pathname === "/dashboard") return null;
 
+  // The room page (RoomPage in WorkFm.tsx) portals its own room name into
+  // #topbar-room-title here, replacing the site brand text — this reclaims
+  // the vertical space the room's own <h1> used to take, letting the hero
+  // card start higher up the page (see RoomPage's header JSX).
+  const isRoomPage = location.pathname === "/workfm";
+
   return (
     <header className="topbar">
       <Link className="topbar-brand" to="/">
         <img className="topbar-logo" src="/favicon.svg" alt="" width={36} height={36} />
         <span className="topbar-brand-text">
-          <span className="topbar-brand-name">CLIAMP RADIO</span>
-          <span className="topbar-brand-by">by baekgaard.dev</span>
+          {isRoomPage ? (
+            <span id="topbar-room-title" />
+          ) : (
+            <>
+              <span className="topbar-brand-name">CLIAMP RADIO</span>
+              <span className="topbar-brand-by">by baekgaard.dev</span>
+            </>
+          )}
         </span>
       </Link>
       <div className="topbar-actions">
+        <div id="topbar-room-actions" className="topbar-room-actions" />
         {!location.pathname.startsWith("/workfm") && (
           <Link className="btn-secondary" to="/workfm">
             WorkFM

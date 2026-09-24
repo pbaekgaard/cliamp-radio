@@ -9,6 +9,7 @@ import {
   verifyCredentials,
 } from "./lib/auth";
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
+import { getColorForName, PRESET_COLORS, renameColorOverride, setColorForName } from "./lib/workfmColors";
 import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
 import { drainText, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
@@ -239,7 +240,17 @@ const server = Bun.serve({
       const body = await req.json().catch(() => null);
       const name = typeof body?.name === "string" ? normalizeWorkFmName(body.name) : null;
       if (!name) return json({ error: "a name (1-24 characters) is required" }, { status: 400 });
-      const token = createWorkFmSessionToken(name);
+      // Reuse the existing session's identity id across a rename (rather
+      // than minting a fresh one) so their past chat messages can be
+      // updated to the new name below — see renameChatAuthor().
+      const existing = getWorkFmIdentity(req);
+      const token = createWorkFmSessionToken(name, existing?.id);
+      if (existing && existing.id && existing.name !== name) {
+        const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+        room?.stream.renameChatAuthor(existing.id, name);
+        room?.stream.pushRenameChatMarker(existing.name, name);
+        renameColorOverride(existing.name, name);
+      }
       return json(
         { name },
         {
@@ -253,7 +264,19 @@ const server = Bun.serve({
     if (pathname === "/api/workfm/me" && req.method === "GET") {
       const identity = getWorkFmIdentity(req);
       if (!identity) return unauthorized();
-      return json({ name: identity.name });
+      return json({ name: identity.name, color: getColorForName(identity.name) });
+    }
+
+    if (pathname === "/api/workfm/color" && req.method === "POST") {
+      const identity = getWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const body = await req.json().catch(() => null);
+      const color = typeof body?.color === "string" ? body.color : null;
+      if (!color || !PRESET_COLORS.includes(color as (typeof PRESET_COLORS)[number])) {
+        return json({ error: "color must be one of the preset options" }, { status: 400 });
+      }
+      setColorForName(identity.name, color);
+      return json({ color });
     }
 
     if (pathname === "/api/workfm/logout" && req.method === "POST") {
@@ -399,7 +422,7 @@ const server = Bun.serve({
         return json({ error: "message can't be empty" }, { status: 400 });
       }
       try {
-        const message = room.stream.postChatMessage(identity.name, body.text);
+        const message = room.stream.postChatMessage(identity.name, body.text, identity.id);
         return json(message, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to send message" }, { status: 400 });

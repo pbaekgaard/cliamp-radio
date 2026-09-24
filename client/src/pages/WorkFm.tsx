@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   api,
@@ -16,7 +23,8 @@ import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
 import { useChatEmotes, type ChatEmote } from "../lib/chatEmotes";
-import { looksLikeEmoteToken, resolveSevenTvEmoteByName } from "../lib/sevenTv";
+import { CHAT_NAME_COLORS } from "../lib/chatColors";
+import { looksLikeEmoteToken, resolveSevenTvEmoteByName, searchSevenTvEmotesLive } from "../lib/sevenTv";
 import { NowPlayingHero } from "../components/NowPlayingHero";
 import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
 
@@ -62,6 +70,162 @@ function SkipIcon() {
       aria-hidden="true"
     >
       <path fill="currentColor" d="M6 5v14l10-7L6 5zm11 0v14h2V5h-2z" />
+    </svg>
+  );
+}
+
+/** Twitch-style "chatters" glyph (two overlapping person silhouettes) —
+ * used for the "who's here" toggle instead of a colored 👥 emoji, so it
+ * reads as a monochrome UI icon rather than a splash of color next to the
+ * name-colored chat itself. */
+function ChattersIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <circle cx="13.2" cy="6.4" r="2.6" />
+      <circle cx="6.6" cy="7.6" r="2.2" />
+      <path d="M13.2 10c-2.7 0-6.4 1.35-6.4 4v2.2h12.8V14c0-2.65-3.7-4-6.4-4z" />
+      <path d="M6.6 10.8c-2.35 0-5.6 1.18-5.6 3.5v1.9h5.2v-1.9c0-1.15.45-2.2 1.22-3.05a8.6 8.6 0 0 0-.82-.45z" />
+    </svg>
+  );
+}
+
+/** Sidebar-collapse glyph: a vertical rail with an arrow — points right to
+ * "hide" the chat, and (mirrored via .workfm-chat-collapse-btn-collapsed
+ * in CSS) points left to bring it back. */
+function ChatCollapseIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="4" y1="3" x2="4" y2="17" />
+      <line x1="8" y1="10" x2="16" y2="10" />
+      <polyline points="12.5,6 16,10 12.5,14" />
+    </svg>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M6 3h12v2h2.5a1.5 1.5 0 0 1 1.5 1.5c0 2.6-1.7 4.7-4.1 5.3-.8 1.9-2.4 3.3-4.4 3.8V18h3v2H7v-2h3v-2.4c-2-.5-3.6-1.9-4.4-3.8C3.2 11.2 1.5 9.1 1.5 6.5A1.5 1.5 0 0 1 3 5h3V3zm0 4H3.7c.2 1.4 1.1 2.6 2.3 3.1V7zm12 0v3.1c1.2-.5 2.1-1.7 2.3-3.1H18z"
+      />
+    </svg>
+  );
+}
+
+/** Points back to "now playing" from the most-played flip face. */
+function BackArrowIcon() {
+  return (
+    <svg
+      className="workfm-icon"
+      viewBox="0 0 20 20"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="12,4 5,10 12,16" />
+      <line x1="5" y1="10" x2="17" y2="10" />
+    </svg>
+  );
+}
+
+/** Used on the keyboard-shortcuts hint button. */
+function KeyboardIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+      <line x1="6" y1="9" x2="6" y2="9" />
+      <line x1="9" y1="9" x2="9" y2="9" />
+      <line x1="12" y1="9" x2="12" y2="9" />
+      <line x1="15" y1="9" x2="15" y2="9" />
+      <line x1="18" y1="9" x2="18" y2="9" />
+      <line x1="6" y1="12" x2="6" y2="12" />
+      <line x1="9" y1="12" x2="9" y2="12" />
+      <line x1="12" y1="12" x2="12" y2="12" />
+      <line x1="15" y1="12" x2="15" y2="12" />
+      <line x1="18" y1="12" x2="18" y2="12" />
+      <line x1="8" y1="15.5" x2="16" y2="15.5" />
+    </svg>
+  );
+}
+
+/** Monochrome smiley used on the emote-picker toggle button in the chat
+ * input, replacing the colored 😊 emoji. */
+function SmileyIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9.25" />
+      <path d="M8 14.5c1 1.4 2.4 2 4 2s3-.6 4-2" />
+      <line x1="8.5" y1="9.5" x2="8.5" y2="9.5" strokeWidth="2.4" />
+      <line x1="15.5" y1="9.5" x2="15.5" y2="9.5" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="17"
+      height="17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6a.5.5 0 0 0 .1-.7l-2-3.4a.5.5 0 0 0-.6-.2l-2.5 1a7.6 7.6 0 0 0-1.7-1L14.4 2.5a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4L9.2 5.1a7.6 7.6 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.4a.5.5 0 0 0 .1.7L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.7l2 3.4a.5.5 0 0 0 .6.2l2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.6a.5.5 0 0 0 .5.4h3.8a.5.5 0 0 0 .5-.4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.5 1a.5.5 0 0 0 .6-.2l2-3.4a.5.5 0 0 0-.1-.7L19.4 13z" />
     </svg>
   );
 }
@@ -301,7 +465,7 @@ export function JoinRoomModal({
           id="workfm-join-name"
           autoFocus
           value={yourName}
-          onChange={(e) => setYourName(e.target.value)}
+          onChange={(e) => setYourName(e.target.value.replace(/\s+/g, ""))}
           maxLength={24}
           placeholder="Pick a name…"
         />
@@ -465,10 +629,12 @@ function AddTrackModal({
   slug,
   onClose,
   onAdded,
+  onUpload,
 }: {
   slug: string;
   onClose: () => void;
   onAdded: () => void;
+  onUpload: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<WorkFmSearchResult[]>([]);
@@ -587,6 +753,16 @@ function AddTrackModal({
               </div>
             </button>
           ))}
+        </div>
+        <div className="workfm-upload-row">
+          <span className="muted">or</span>
+          <button
+            type="button"
+            className="workfm-upload-btn"
+            onClick={onUpload}
+          >
+            <UploadIcon /> Upload an MP3
+          </button>
         </div>
       </form>
     </Modal>
@@ -820,7 +996,7 @@ export function MembersPanel({
         {members.map((m) => (
           <li key={m.name} className="workfm-listener-row">
             <span>
-              {m.name}
+              <span style={{ color: m.color }}>{m.name}</span>
               {name && m.name.toLowerCase() === name.toLowerCase() && (
                 <span className="workfm-you-tag">You</span>
               )}
@@ -844,6 +1020,110 @@ export function MembersPanel({
   );
 }
 
+/** Twitch-style chat settings popover: change your display name (re-runs
+ * the same name-only "identify" flow as joining, under the hood) and pick
+ * your chat name color from the same fixed palette the server validates
+ * against (see workfmColors.ts). */
+function ChatSettingsPanel({
+  name,
+  slug,
+  currentColor,
+  onSaved,
+}: {
+  name: string;
+  slug: string;
+  currentColor: string | undefined;
+  onSaved: () => void;
+}) {
+  const { identify } = useWorkFm();
+  const [newName, setNewName] = useState(name);
+  const [previewColor, setPreviewColor] = useState(currentColor);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPreviewColor(currentColor);
+  }, [currentColor]);
+
+  const trimmedName = newName.trim();
+  const nameChanged = trimmedName.length > 0 && trimmedName !== name;
+  const colorChanged = previewColor !== undefined && previewColor !== currentColor;
+  const canSave = !saving && (nameChanged || colorChanged);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSave) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (nameChanged) await identify(trimmedName, slug);
+      if (colorChanged && previewColor) await api.workfmSetColor(previewColor);
+      onSaved();
+    } catch {
+      setError("Couldn't save — try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="workfm-settings-panel" onSubmit={handleSave}>
+      <div className="workfm-chat-preview">
+        <span className="workfm-color-section-label">Preview</span>
+        <p className="workfm-chat-row workfm-chat-preview-row">
+          <strong style={{ color: previewColor }}>{(newName.trim() || name).toLowerCase()}</strong>: <span>Hey, this is what my messages look like!</span>
+        </p>
+      </div>
+      <div className="workfm-rename-form">
+        <label htmlFor="workfm-rename-input" className="workfm-color-section-label">
+          Display name
+        </label>
+        <div className="workfm-rename-row">
+          <input
+            id="workfm-rename-input"
+            value={newName}
+            maxLength={24}
+            onChange={(e) => setNewName(e.target.value.replace(/\s+/g, ""))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+          />
+        </div>
+      </div>
+      <div className="workfm-color-section">
+        <span className="workfm-color-section-label">Name color</span>
+        <div className="workfm-color-grid">
+          {CHAT_NAME_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={
+                color.toLowerCase() === previewColor?.toLowerCase()
+                  ? "workfm-color-swatch workfm-color-swatch-active"
+                  : "workfm-color-swatch"
+              }
+              style={{ backgroundColor: color }}
+              title={color}
+              aria-label={`Use ${color} as your name color`}
+              disabled={saving}
+              onClick={() => setPreviewColor(color)}
+            />
+          ))}
+        </div>
+      </div>
+      {error && <p className="workfm-rename-error">{error}</p>}
+      <div className="workfm-settings-footer">
+        <button type="submit" className="btn-primary workfm-chat-send-btn" disabled={!canSave}>
+          Save
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // Matches a whole token that's a URL, optionally prefixed with "www." (no
 // scheme) — chat messages don't require people to type the full
 // "https://" for a link to become clickable.
@@ -853,7 +1133,7 @@ const URL_TOKEN_RE = /^(https?:\/\/\S+|www\.\S+)$/i;
  * that's either an emote name (7TV, Twitch, or BTTV global/top charts) or
  * a URL for, respectively, its image or a clickable link — same convention
  * every chat client uses. */
-function renderChatText(
+export function renderChatText(
   text: string,
   emotes: Map<string, ChatEmote> | null
 ): React.ReactNode {
@@ -861,19 +1141,50 @@ function renderChatText(
   return parts.map((part, i) => {
     const emote = emotes?.get(part);
     if (emote) {
-      return (
-        <img
-          key={i}
-          src={emote.url}
-          alt={part}
-          title={`${part} (${emoteSourceLabel(emote.source)})`}
-          className="chat-emote"
-          loading="lazy"
-        />
-      );
+      return <EmoteImage key={i} token={part} emote={emote} />;
     }
     return <span key={i}>{linkifyToken(part)}</span>;
   });
+}
+
+/** A chat emote image that, on hover, shows an enlarged preview (name +
+ * source included) via a `document.body` portal — rendered outside the
+ * scrollable chat list so it's never clipped by its `overflow: hidden`,
+ * regardless of where in the list the emote sits. */
+function EmoteImage({ token, emote }: { token: string; emote: ChatEmote }) {
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  function show() {
+    const rect = imgRef.current?.getBoundingClientRect();
+    if (rect) setAnchor({ top: rect.top, left: rect.left + rect.width / 2 });
+  }
+
+  return (
+    <>
+      <img
+        ref={imgRef}
+        src={emote.url}
+        alt={token}
+        className="chat-emote"
+        loading="lazy"
+        onMouseEnter={show}
+        onMouseLeave={() => setAnchor(null)}
+      />
+      {anchor &&
+        createPortal(
+          <div
+            className="chat-emote-tooltip"
+            style={{ top: anchor.top, left: anchor.left }}
+          >
+            <img src={emote.url} alt={token} />
+            <span className="chat-emote-tooltip-name">{token}</span>
+            <span className="chat-emote-tooltip-source">{emoteSourceLabel(emote.source)}</span>
+          </div>,
+          document.body
+        )}
+    </>
+  );
 }
 
 /** Trims common trailing punctuation off a token before deciding whether
@@ -920,12 +1231,46 @@ function EmotePicker({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [liveResults, setLiveResults] = useState<ChatEmote[]>([]);
+  const [searching, setSearching] = useState(false);
   const list = emotes ? [...emotes.values()] : [];
-  const filtered = query.trim()
+  const trimmed = query.trim();
+  const filtered = trimmed
     ? list.filter((e) =>
-        e.name.toLowerCase().includes(query.trim().toLowerCase())
+        e.name.toLowerCase().includes(trimmed.toLowerCase())
       )
     : list;
+
+  // The preloaded charts only cover ~350 of 7TV's most popular emotes —
+  // anything more obscure needs a live search against 7TV's full catalog,
+  // debounced so it doesn't fire on every keystroke. Results are merged in
+  // underneath the instant local matches (which stay first/stable) rather
+  // than replacing them.
+  useEffect(() => {
+    if (trimmed.length < 2) {
+      setLiveResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      const found = await searchSevenTvEmotesLive(trimmed);
+      if (cancelled) return;
+      setLiveResults(found.map((e) => ({ ...e, source: "7tv" as const })));
+      setSearching(false);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [trimmed]);
+
+  const merged = useMemo(() => {
+    const seen = new Set(filtered.map((e) => e.name));
+    const extra = liveResults.filter((e) => !seen.has(e.name));
+    return [...filtered, ...extra];
+  }, [filtered, liveResults]);
 
   return (
     <div className="emote-picker">
@@ -948,7 +1293,7 @@ function EmotePicker({
       <div className="emote-picker-grid">
         {!emotes && <p className="muted">Loading emotes…</p>}
         {emotes &&
-          filtered.slice(0, 200).map((e) => (
+          merged.slice(0, 200).map((e) => (
             <button
               key={`${e.source}:${e.name}`}
               type="button"
@@ -959,8 +1304,11 @@ function EmotePicker({
               <img src={e.url} alt={e.name} loading="lazy" />
             </button>
           ))}
-        {emotes && filtered.length === 0 && (
+        {emotes && merged.length === 0 && !searching && (
           <p className="muted">No emotes match "{query}".</p>
+        )}
+        {searching && merged.length === 0 && (
+          <p className="muted">Searching 7TV…</p>
         )}
       </div>
     </div>
@@ -993,8 +1341,16 @@ export function ChatPanel({
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const [showEmotePicker, setShowEmotePicker] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  // Twitch-style "collapse chat" — tucks the message list/input/toolbar
+  // away, leaving just the header (title + the same toggle, mirrored) so
+  // it's a single click to bring back.
+  const [collapsed, setCollapsed] = useState(false);
   const [suggestions, setSuggestions] = useState<ChatEmote[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  // Drives a debounced live 7TV search (see below) so autocomplete isn't
+  // limited to the couple hundred preloaded chart emotes.
+  const [currentWord, setCurrentWord] = useState("");
   // Set right after Tab/Enter accepts a suggestion, to the emote name that
   // was just inserted. While the word at the caret is still a prefix of
   // this (i.e. the user is only deleting characters back off the end of
@@ -1094,6 +1450,7 @@ export function ChatPanel({
     setShowEmotePicker(false);
     setSuggestions([]);
     setSuppressUntilDiverge(emoteName);
+    setCurrentWord("");
     inputRef.current?.focus();
   }
 
@@ -1104,12 +1461,14 @@ export function ChatPanel({
   function updateSuggestions(value: string, caret: number) {
     if (!emotes) {
       setSuggestions([]);
+      setCurrentWord("");
       return;
     }
     const word = /(\S+)$/.exec(value.slice(0, caret))?.[1] ?? "";
     if (word.length < 2) {
       setSuggestions([]);
       setSuppressUntilDiverge(null);
+      setCurrentWord("");
       return;
     }
     if (suppressUntilDiverge) {
@@ -1117,6 +1476,7 @@ export function ChatPanel({
         // Still just trimming back off the word they already accepted —
         // stay quiet.
         setSuggestions([]);
+        setCurrentWord("");
         return;
       }
       // They've typed something that no longer matches what was accepted
@@ -1131,7 +1491,36 @@ export function ChatPanel({
       .slice(0, 6);
     setSuggestions(matches);
     setSuggestionIndex(0);
+    setCurrentWord(word);
   }
+
+  // The instant matches above only search ~350 preloaded chart emotes —
+  // this backs them up with a debounced live search against 7TV's full
+  // catalog so tab-completion finds *any* real 7TV emote by name, same as
+  // the emote picker's search box.
+  useEffect(() => {
+    const word = currentWord;
+    if (word.length < 2) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const found = await searchSevenTvEmotesLive(word);
+      if (cancelled) return;
+      const lower = word.toLowerCase();
+      const startsWith = found.filter((e) => e.name.toLowerCase().startsWith(lower));
+      if (startsWith.length === 0) return;
+      setSuggestions((prev) => {
+        const seen = new Set(prev.map((p) => p.name));
+        const extra = startsWith
+          .filter((e) => !seen.has(e.name))
+          .map((e) => ({ ...e, source: "7tv" as const }));
+        return [...prev, ...extra].slice(0, 6);
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [currentWord]);
 
   function applySuggestion(emote: ChatEmote) {
     const input = inputRef.current;
@@ -1144,6 +1533,7 @@ export function ChatPanel({
     setText(newText);
     setSuggestions([]);
     setSuppressUntilDiverge(emote.name);
+    setCurrentWord("");
     const newCaret = wordStart + emote.name.length + 1;
     // Setting selectionRange has to happen after the value actually
     // updates in the DOM, which controlled-input re-renders don't
@@ -1183,6 +1573,7 @@ export function ChatPanel({
       setText("");
       setSuggestions([]);
       setSuppressUntilDiverge(null);
+      setCurrentWord("");
       // Refresh right away instead of waiting on the next poll tick so the
       // sent message (and anything else that landed meanwhile) shows up
       // immediately rather than up to a few seconds later.
@@ -1200,22 +1591,70 @@ export function ChatPanel({
     }
   }
 
+  const myColor = members?.find((m) => m.name.toLowerCase() === name?.toLowerCase())?.color;
+
+  if (collapsed) {
+    return (
+      <div
+        className="workfm-chat-panel workfm-chat-panel-collapsed"
+        role="button"
+        tabIndex={0}
+        title="Show chat"
+        aria-label="Show chat"
+        onClick={() => setCollapsed(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") setCollapsed(false);
+        }}
+      >
+        <button
+          type="button"
+          className="workfm-chat-expand-btn workfm-chat-collapse-btn-collapsed"
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <ChatCollapseIcon />
+        </button>
+        <span className="workfm-chat-collapsed-label">Chat</span>
+      </div>
+    );
+  }
+
   return (
     <div className="workfm-chat-panel">
       <div className="workfm-chat-header">
-        <h2 className="workfm-listeners-heading">Chat</h2>
-        {members && (
-          <button
-            type="button"
-            className="btn-secondary workfm-members-toggle-btn"
-            onClick={() => setShowMembers((v) => !v)}
-          >
-            👥 Who's here ({members.length + (anonymousListeners ?? 0)})
-          </button>
-        )}
+        <button
+          type="button"
+          className="workfm-chat-toolbar-btn workfm-chat-collapse-btn"
+          title="Hide chat"
+          aria-label="Hide chat"
+          onClick={() => {
+            setShowMembers(false);
+            setShowSettings(false);
+            setCollapsed(true);
+          }}
+        >
+          <ChatCollapseIcon />
+        </button>
+        <h2 className="workfm-listeners-heading workfm-chat-title">Chat</h2>
+        <div className="workfm-chat-header-actions">
+          {members && (
+            <button
+              type="button"
+              className="workfm-chat-toolbar-btn"
+              title="Who's here"
+              aria-label="Who's here"
+              onClick={() => {
+                setShowSettings(false);
+                setShowMembers((v) => !v);
+              }}
+            >
+              <ChattersIcon /> <span>{members.length + (anonymousListeners ?? 0)}</span>
+            </button>
+          )}
+        </div>
       </div>
       {showMembers && members && (
-        <div className="workfm-members-popover-wrap">
+        <div className="workfm-chat-popover-wrap workfm-chat-popover-members">
           <button
             type="button"
             className="workfm-members-popover-close"
@@ -1231,17 +1670,35 @@ export function ChatPanel({
           />
         </div>
       )}
+      {showSettings && name && (
+        <Modal title="Chat settings" onClose={() => setShowSettings(false)}>
+          <ChatSettingsPanel
+            name={name}
+            slug={slug}
+            currentColor={myColor}
+            onSaved={() => {
+              onSent();
+              setShowSettings(false);
+            }}
+          />
+        </Modal>
+      )}
       <div className="workfm-chat-list-wrap">
         <ul
           className="workfm-chat-list"
           ref={listRef}
           onScroll={handleScroll}
         >
-          {messages.map((m) => (
-            <li key={m.id} className="workfm-chat-row">
-              <strong>{m.name}</strong>: <span>{renderChatText(m.text, displayEmotes)}</span>
-            </li>
-          ))}
+          {messages.map((m) =>
+            m.system ? (
+              <li key={m.id} className="workfm-chat-row workfm-chat-row-system">
+                <span>{m.text}</span>
+              </li>
+            ) : (
+              <li key={m.id} className="workfm-chat-row">                <strong style={{ color: m.color }}>{m.name.toLowerCase()}</strong>: <span>{renderChatText(m.text, displayEmotes)}</span>
+              </li>
+            )
+          )}
           {messages.length === 0 && (
             <li className="muted">No messages yet.</li>
           )}
@@ -1257,72 +1714,89 @@ export function ChatPanel({
         )}
       </div>
       {name ? (
-        <form className="workfm-chat-form" onSubmit={send}>
-          <div className="workfm-chat-input-wrap">
-            {showEmotePicker && (
-              <EmotePicker
-                emotes={emotes}
-                onPick={insertEmote}
-                onClose={() => setShowEmotePicker(false)}
+        <>
+          <form className="workfm-chat-form" onSubmit={send}>
+            <div className="workfm-chat-input-wrap">
+              {showEmotePicker && (
+                <EmotePicker
+                  emotes={emotes}
+                  onPick={insertEmote}
+                  onClose={() => setShowEmotePicker(false)}
+                />
+              )}
+              {!showEmotePicker && suggestions.length > 0 && (
+                <ul className="emote-suggest-list">
+                  {suggestions.map((s, i) => (
+                    <li key={`${s.source}:${s.name}`}>
+                      <button
+                        type="button"
+                        className={
+                          i === suggestionIndex
+                            ? "emote-suggest-item active"
+                            : "emote-suggest-item"
+                        }
+                        // Prevents the input from losing focus on click, which
+                        // would otherwise fire before onClick and dismiss the
+                        // list before the pick registers.
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applySuggestion(s)}
+                      >
+                        <img src={s.url} alt="" />
+                        <span>{s.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <input
+                ref={inputRef}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  updateSuggestions(
+                    e.target.value,
+                    e.target.selectionStart ?? e.target.value.length
+                  );
+                }}
+                onKeyDown={handleInputKeyDown}
+                maxLength={500}
+                placeholder="Send a message"
+                disabled={sending}
               />
-            )}
-            {!showEmotePicker && suggestions.length > 0 && (
-              <ul className="emote-suggest-list">
-                {suggestions.map((s, i) => (
-                  <li key={`${s.source}:${s.name}`}>
-                    <button
-                      type="button"
-                      className={
-                        i === suggestionIndex
-                          ? "emote-suggest-item active"
-                          : "emote-suggest-item"
-                      }
-                      // Prevents the input from losing focus on click, which
-                      // would otherwise fire before onClick and dismiss the
-                      // list before the pick registers.
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => applySuggestion(s)}
-                    >
-                      <img src={s.url} alt="" />
-                      <span>{s.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <input
-              ref={inputRef}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                updateSuggestions(
-                  e.target.value,
-                  e.target.selectionStart ?? e.target.value.length
-                );
-              }}
-              onKeyDown={handleInputKeyDown}
-              maxLength={500}
-              placeholder="Say something…"
-              disabled={sending}
-            />
-          </div>
-          <button
-            type="button"
-            className="btn-secondary workfm-emote-toggle-btn"
-            title="Emotes"
-            aria-label="Open emote picker"
-            onClick={() => setShowEmotePicker((v) => !v)}
-          >
-            😊
-          </button>
-          <button
-            className="btn-secondary"
-            type="submit"
-            disabled={sending || !text.trim()}
-          >
-            Send
-          </button>
-        </form>
+              <button
+                type="button"
+                className="workfm-emote-toggle-btn"
+                title="Emotes"
+                aria-label="Open emote picker"
+                onClick={() => setShowEmotePicker((v) => !v)}
+              >
+                <SmileyIcon />
+              </button>
+            </div>
+            <div className="workfm-chat-toolbar">
+              <div className="workfm-chat-toolbar-spacer" />
+              <button
+                type="button"
+                className="workfm-chat-toolbar-btn"
+                title="Chat settings"
+                aria-label="Chat settings"
+                onClick={() => {
+                  setShowMembers(false);
+                  setShowSettings((v) => !v);
+                }}
+              >
+                <GearIcon />
+              </button>
+              <button
+                className="btn-primary workfm-chat-send-btn"
+                type="submit"
+                disabled={sending || !text.trim()}
+              >
+                Chat
+              </button>
+            </div>
+          </form>
+        </>
       ) : (
         <p className="muted">Join to chat.</p>
       )}
@@ -1352,22 +1826,28 @@ function MostPlayedPanel({
   }
 
   return (
-    <aside className="workfm-listeners-panel">
-      <h2 className="workfm-listeners-heading">Most played songs</h2>
+    <aside className="workfm-listeners-panel workfm-leaderboard">
+      <div className="workfm-leaderboard-label">
+        <TrophyIcon />
+        <span>Most played songs</span>
+      </div>
       <p className="muted workfm-leaderboard-hint">
         Top 5 most-played songs across every WorkFM room
       </p>
-      <ul className="workfm-library-list">
+      <ul className="workfm-leaderboard-list">
         {mostPlayed.map((t, i) => (
-          <li key={t.libraryId} className="workfm-library-row">
-            <div className="workfm-queue-row-info">
-              <span className="workfm-queue-title">
-                {i + 1}. {t.title}
-              </span>
-              <span className="workfm-queue-artist">{t.artist}</span>
+          <li key={t.libraryId} className="workfm-leaderboard-row">
+            <span
+              className={`workfm-leaderboard-rank${i < 3 ? ` workfm-leaderboard-rank-${i + 1}` : ""}`}
+            >
+              {i === 0 ? <TrophyIcon /> : i + 1}
+            </span>
+            <div className="workfm-leaderboard-meta">
+              <span className="workfm-leaderboard-title">{t.title}</span>
+              <span className="workfm-leaderboard-artist">{t.artist}</span>
             </div>
-            <div className="workfm-library-row-actions">
-              <span className="muted">
+            <div className="workfm-leaderboard-actions">
+              <span className="workfm-leaderboard-plays">
                 {t.playCount} {t.playCount === 1 ? "play" : "plays"}
               </span>
               {t.available && (
@@ -1543,6 +2023,19 @@ function RoomPage({ slug }: { slug: string }) {
     if (identityName && roomSlug !== slug) bindRoom(slug);
   }, [identityName, roomSlug, slug, bindRoom]);
   const name = roomSlug === slug ? identityName : null;
+
+  // Chat is a full-viewport-height fixed sidebar (see .workfm-chat-fixed),
+  // so the page's own scrollbar is mostly cosmetic clutter next to it —
+  // hide it here (only while this page is mounted) rather than site-wide.
+  useEffect(() => {
+    document.documentElement.classList.add("workfm-hide-scrollbar");
+    document.body.classList.add("workfm-hide-scrollbar");
+    return () => {
+      document.documentElement.classList.remove("workfm-hide-scrollbar");
+      document.body.classList.remove("workfm-hide-scrollbar");
+    };
+  }, []);
+
   const [state, setState] = useState<WorkFmQueueState>({
     roomName: "",
     nowPlaying: null,
@@ -1581,6 +2074,9 @@ function RoomPage({ slug }: { slug: string }) {
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
   const [showHistorySearchModal, setShowHistorySearchModal] = useState(false);
   const [showKeybindsModal, setShowKeybindsModal] = useState(false);
+  // Flips the now-playing hero card around to reveal the most-played
+  // leaderboard on its back — see the trophy button rendered over the card.
+  const [heroFlipped, setHeroFlipped] = useState(false);
   // Driven straight off state.nowPlaying (not displayedNowPlaying, which
   // deliberately lags for audio-sync purposes) so the alarm overlay reacts
   // the instant the server flips into spisetid, not a few seconds later.
@@ -1819,38 +2315,53 @@ function RoomPage({ slug }: { slug: string }) {
       <SpiseTidOverlay active={spiseTidActive}>
         <ChatPanel slug={slug} messages={state.chat} name={name} onSent={poll} members={state.members} anonymousListeners={state.anonymousListeners} />
       </SpiseTidOverlay>
-      <div className="workfm-header">
-        <div>
-          <h1>{state.roomName || "Radio Bækgaard"}</h1>
-          {!name && (
+
+      {document.getElementById("topbar-room-title") &&
+        createPortal(
+          <span className="topbar-room-title-text">
+            {state.roomName || "Radio Bækgaard"}
+          </span>,
+          document.getElementById("topbar-room-title")!,
+        )}
+
+      {!name && (
+        <div className="workfm-header">
+          <div>
             <p className="muted">
               Join to request tracks, upload MP3s, chat, like, or vote to skip.
             </p>
-          )}
+          </div>
         </div>
-        <div className="header-actions">
-          {name ? (
-            <>
-              <button
-                className="btn-secondary"
-                onClick={() => toggle(streamUrl, "Radio Bækgaard")}
-              >
-                {playing ? "Pause stream" : "▶ Listen in"}
-              </button>
-              <button className="btn-danger" onClick={handleLeave}>
-                Leave room
-              </button>
-            </>
-          ) : (
+      )}
+
+      {!name &&
+        document.getElementById("topbar-room-actions") &&
+        createPortal(
+          <button
+            className="btn-primary"
+            onClick={() => setShowJoinModal(true)}
+          >
+            Join
+          </button>,
+          document.getElementById("topbar-room-actions")!,
+        )}
+
+      {name &&
+        document.getElementById("topbar-room-actions") &&
+        createPortal(
+          <>
             <button
-              className="btn-primary"
-              onClick={() => setShowJoinModal(true)}
+              className="btn-secondary"
+              onClick={() => toggle(streamUrl, "Radio Bækgaard")}
             >
-              Join
+              {playing ? "Pause stream" : "▶ Listen in"}
             </button>
-          )}
-        </div>
-      </div>
+            <button className="btn-danger" onClick={handleLeave}>
+              Leave
+            </button>
+          </>,
+          document.getElementById("topbar-room-actions")!,
+        )}
 
       {showJoinModal && (
         <JoinRoomModal
@@ -1877,6 +2388,10 @@ function RoomPage({ slug }: { slug: string }) {
           slug={slug}
           onClose={() => setShowAddTrackModal(false)}
           onAdded={poll}
+          onUpload={() => {
+            setShowAddTrackModal(false);
+            setShowUploadModal(true);
+          }}
         />
       )}
       {showHistorySearchModal && (
@@ -1893,7 +2408,19 @@ function RoomPage({ slug }: { slug: string }) {
 
       <div className="workfm-now-playing-row">
       <div className="workfm-now-playing">
-        <NowPlayingHero
+        <div className={`workfm-hero-flip${heroFlipped ? " workfm-hero-flip-active" : ""}`}>
+          <div className="workfm-hero-flip-inner">
+            <div className="workfm-hero-flip-face workfm-hero-flip-front">
+              <button
+                type="button"
+                className="workfm-hero-trophy-btn"
+                title="Most played songs"
+                aria-label="Show most played songs"
+                onClick={() => setHeroFlipped(true)}
+              >
+                <TrophyIcon />
+              </button>
+              <NowPlayingHero
           item={displayedNowPlaying}
           controls={
             name && displayedNowPlaying ? (
@@ -1985,23 +2512,29 @@ function RoomPage({ slug }: { slug: string }) {
               ? "This track will play again when it ends."
               : null
           }
-        />
-      </div>
-      <div className="workfm-now-playing-side">
-        <ChatPanel
-          slug={slug}
-          messages={state.chat}
-          name={name}
-          onSent={poll}
-          members={state.members}
-          anonymousListeners={state.anonymousListeners}
-        />
-      </div>
-      </div>
+              />
+            </div>
+            <div className="workfm-hero-flip-face workfm-hero-flip-back">
+              <button
+                type="button"
+                className="workfm-hero-trophy-btn"
+                title="Back to now playing"
+                aria-label="Back to now playing"
+                onClick={() => setHeroFlipped(false)}
+              >
+                <BackArrowIcon />
+              </button>
+              <MostPlayedPanel
+                mostPlayed={state.mostPlayed}
+                slug={slug}
+                name={name}
+                onRequeued={poll}
+              />
+            </div>
+          </div>
+        </div>
 
-      <div className="workfm-layout">
-        <div className="workfm-main">
-          {name && (
+        {name && (
             <>
               <div className="workfm-request-panel">
                 <p className="workfm-request-label">Request a track</p>
@@ -2109,15 +2642,17 @@ function RoomPage({ slug }: { slug: string }) {
 
           <LibraryPanel slug={slug} name={name} onRequeued={poll} />
         </div>
+      </div>
 
-        <div className="workfm-sidebar">
-          <MostPlayedPanel
-            mostPlayed={state.mostPlayed}
-            slug={slug}
-            name={name}
-            onRequeued={poll}
-          />
-        </div>
+      <div className="workfm-chat-fixed">
+        <ChatPanel
+          slug={slug}
+          messages={state.chat}
+          name={name}
+          onSent={poll}
+          members={state.members}
+          anonymousListeners={state.anonymousListeners}
+        />
       </div>
 
       <button
@@ -2127,7 +2662,7 @@ function RoomPage({ slug }: { slug: string }) {
         aria-label="Show keyboard shortcuts"
         onClick={() => setShowKeybindsModal(true)}
       >
-        ?
+        <KeyboardIcon />
       </button>
     </div>
   );

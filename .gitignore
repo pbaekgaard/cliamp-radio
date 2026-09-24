@@ -17,4 +17,5 @@ server/data/workfm-history-downloads/
 server/data/workfm-prefetch/
 server/data/music/
 server/data/workfm-chat-state.json
+server/data/workfm-colors.json
 *.db

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { WorkFmQueueItem } from "../api";
 
@@ -32,6 +32,83 @@ export function EqualizerBars() {
       <span />
       <span />
       <span />
+    </div>
+  );
+}
+
+const MIN_TITLE_FONT = 32;
+const MAX_TITLE_FONT = 56;
+let measureCanvas: HTMLCanvasElement | null = null;
+
+function measureTextWidth(text: string, font: string): number {
+  if (!measureCanvas) measureCanvas = document.createElement("canvas");
+  const ctx = measureCanvas.getContext("2d");
+  if (!ctx) return 0;
+  ctx.font = font;
+  return ctx.measureText(text).width;
+}
+
+/** Sizes the now-playing title down from a 56px default to a 32px floor
+ * based on how long the song name actually renders — longer titles shrink
+ * to fit their line — and if even the floor size still can't fit the
+ * hero's width in one line, falls back to a scrolling marquee instead of
+ * wrapping or clipping the text. */
+function useFitTitle(text: string) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [fontSize, setFontSize] = useState(MAX_TITLE_FONT);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    function measure() {
+      const container = ref.current;
+      if (!container) return;
+      const width = container.clientWidth;
+      if (!width) return;
+      const cs = getComputedStyle(container);
+      const baseSize = 100;
+      const font = `${cs.fontWeight} ${baseSize}px ${cs.fontFamily}`;
+      const textWidth = measureTextWidth(text, font);
+      if (!textWidth) return;
+      const fitted = (width / textWidth) * baseSize;
+      if (fitted >= MAX_TITLE_FONT) {
+        setFontSize(MAX_TITLE_FONT);
+        setOverflowing(false);
+      } else if (fitted <= MIN_TITLE_FONT) {
+        setFontSize(MIN_TITLE_FONT);
+        setOverflowing(true);
+      } else {
+        setFontSize(fitted);
+        setOverflowing(false);
+      }
+    }
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+
+  return { ref, fontSize, overflowing };
+}
+
+function TitleFit({ text }: { text: string }) {
+  const { ref, fontSize, overflowing } = useFitTitle(text);
+  return (
+    <div ref={ref} className="kiosk-hero-title" style={{ fontSize }}>
+      {overflowing ? (
+        <div
+          className="kiosk-hero-title-marquee"
+          style={{ animationDuration: `${Math.max(6, text.length * 0.28)}s` }}
+        >
+          <span>{text}</span>
+          <span aria-hidden="true">{text}</span>
+        </div>
+      ) : (
+        text
+      )}
     </div>
   );
 }
@@ -99,7 +176,7 @@ export function NowPlayingHero({
       <div className="kiosk-hero-label">
         <EqualizerBars /> Now playing
       </div>
-      <div className="kiosk-hero-title">{item.title}</div>
+      <TitleFit text={item.title} />
       <div className="kiosk-hero-artist">{item.artist}</div>
       <div className="kiosk-hero-meta">
         {item.addedBy === "Auto DJ" ? (
@@ -111,16 +188,14 @@ export function NowPlayingHero({
         )}
         {item.likes > 0 && <span className="kiosk-hero-likes"> · ♥ {item.likes}</span>}
       </div>
-      {duration > 0 && (
-        <div className="kiosk-progress">
-          <div className="kiosk-progress-track">
-            <div className="kiosk-progress-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="kiosk-progress-time muted">
-            {formatClock(elapsed)} / {formatClock(duration)}
-          </div>
+      <div className="kiosk-progress">
+        <div className="kiosk-progress-track">
+          <div className="kiosk-progress-fill" style={{ width: `${pct}%` }} />
         </div>
-      )}
+        <div className="kiosk-progress-time muted">
+          {duration > 0 ? `${formatClock(elapsed)} / ${formatClock(duration)}` : "-- : -- / -- : --"}
+        </div>
+      </div>
       {(controls !== undefined || hint !== undefined) && (
         <div className="kiosk-hero-footer">
           <div className="kiosk-hero-controls">{controls}</div>
