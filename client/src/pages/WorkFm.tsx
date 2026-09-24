@@ -995,6 +995,16 @@ export function ChatPanel({
   const [showMembers, setShowMembers] = useState(false);
   const [suggestions, setSuggestions] = useState<ChatEmote[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  // Set right after Tab/Enter accepts a suggestion, to the emote name that
+  // was just inserted. While the word at the caret is still a prefix of
+  // this (i.e. the user is only deleting characters back off the end of
+  // what they just accepted, like "helloWorld" -> "hello"), suggestions
+  // stay suppressed rather than popping back up for a word they've already
+  // dismissed — so backspacing down to "hello" and hitting Enter just
+  // sends the message instead of re-suggesting "helloWorld" again. Any
+  // edit that diverges from that prefix (different chars, or a new word
+  // entirely) clears it and suggestions resume normally.
+  const [suppressUntilDiverge, setSuppressUntilDiverge] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const emotes = useChatEmotes();
@@ -1083,6 +1093,7 @@ export function ChatPanel({
     setText((t) => (t && !t.endsWith(" ") ? `${t} ${emoteName} ` : `${t}${emoteName} `));
     setShowEmotePicker(false);
     setSuggestions([]);
+    setSuppressUntilDiverge(emoteName);
     inputRef.current?.focus();
   }
 
@@ -1098,7 +1109,20 @@ export function ChatPanel({
     const word = /(\S+)$/.exec(value.slice(0, caret))?.[1] ?? "";
     if (word.length < 2) {
       setSuggestions([]);
+      setSuppressUntilDiverge(null);
       return;
+    }
+    if (suppressUntilDiverge) {
+      if (suppressUntilDiverge.toLowerCase().startsWith(word.toLowerCase())) {
+        // Still just trimming back off the word they already accepted —
+        // stay quiet.
+        setSuggestions([]);
+        return;
+      }
+      // They've typed something that no longer matches what was accepted
+      // (different word, or grew past it in a new direction) — treat as a
+      // fresh word going forward.
+      setSuppressUntilDiverge(null);
     }
     const lower = word.toLowerCase();
     const matches = [...emotes.values()]
@@ -1119,6 +1143,7 @@ export function ChatPanel({
     const newText = `${text.slice(0, wordStart)}${emote.name} ${after}`;
     setText(newText);
     setSuggestions([]);
+    setSuppressUntilDiverge(emote.name);
     const newCaret = wordStart + emote.name.length + 1;
     // Setting selectionRange has to happen after the value actually
     // updates in the DOM, which controlled-input re-renders don't
@@ -1131,7 +1156,11 @@ export function ChatPanel({
 
   function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (suggestions.length === 0) return;
-    if (e.key === "Tab") {
+    if (e.key === "Tab" || e.key === "Enter") {
+      // Enter accepts the highlighted suggestion exactly like Tab, but
+      // deliberately does NOT also send the message — that needs a second,
+      // separate Enter press once the suggestion list is gone, so picking
+      // an emote never accidentally fires off a half-typed message.
       e.preventDefault();
       applySuggestion(suggestions[suggestionIndex]!);
     } else if (e.key === "ArrowDown") {
@@ -1153,6 +1182,7 @@ export function ChatPanel({
       await api.workfmPostChat(slug, text.trim());
       setText("");
       setSuggestions([]);
+      setSuppressUntilDiverge(null);
       // Refresh right away instead of waiting on the next poll tick so the
       // sent message (and anything else that landed meanwhile) shows up
       // immediately rather than up to a few seconds later.
