@@ -229,7 +229,6 @@ export interface WorkFmLibraryTrack {
   likes: number;
   likedByMe: boolean;
   available: boolean;
-  savedUntil?: number;
 }
 
 export type WorkFmLibraryView = "history" | "most-liked" | "saved";

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { relayPaced } from "./audioRelay";
-import { attachSavedUpload, getLibraryTrack, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOAD_TTL_MS, SAVED_UPLOADS_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, attachYoutubeCache, getCachedYoutubeFile, getLibraryTrack, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOADS_DIR, YOUTUBE_CACHE_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 import {
   announcementFilePath,
@@ -45,7 +45,6 @@ import {
 export const ICY_METAINT = 16000; // bytes of audio between each ICY metadata block
 const AUDIO_ARGS = ["-ar", "44100", "-ac", "2", "-b:a", "128k", "-f", "mp3"];
 const AUDIO_BYTES_PER_SEC = 16000; // 128kbps ÷ 8 — matches AUDIO_ARGS's bitrate, used to pace relayPaced()
-const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a track starts playing out
 // How much recent audio is kept around so a *newly connecting* listener can
 // be handed a few seconds' worth all at once (as fast as their connection
 // allows) instead of only ever receiving new bytes at the strict real-time
@@ -57,13 +56,32 @@ const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2; // ~2s buffered ahead before a 
 // network hiccups right after joining, which otherwise show up as an
 // audible drop within the first few seconds.
 const BACKLOG_BYTES = AUDIO_BYTES_PER_SEC * 4; // ~4s
+// How many seconds two tracks overlap during a crossfaded transition (see
+// scheduleLookahead()/runCrossfade() below) — only happens when the
+// upcoming track's audio is already fully downloaded to disk by the time
+// the current one is ending; otherwise playback falls back to the older
+// silence-bridged hard cut.
+const CROSSFADE_SEC = 3;
+// relayPaced() bursts this out instantly (see audioRelay.ts) rather than
+// dripping it out at bytesPerSec, so a *cold* start (nobody listening, so
+// the auto-DJ was asleep and just spun a fresh ffmpeg up for the first
+// joiner) gets an instant ~2s cushion instead of waiting out 2s of
+// real-time trickle. Deliberately kept lower than BACKLOG_BYTES (rather
+// than raised to match it) so already-connected listeners don't gain an
+// extra silent gap at every track change — this only controls the one-time
+// wait before a *newly started* track's first bytes go out at all.
+const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2;
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
-// Where tracks get downloaded ahead of time during the spisetid pause
-// window (see prefetchQueue() below), so they start playing instantly the
-// moment music resumes at 12:00 instead of paying yt-dlp's usual ~few-
-// second startup cost on the very first (most noticeable) track back.
+// Where tracks get downloaded ahead of time — during the spisetid pause
+// window (see prefetchQueue()) so they start playing instantly the moment
+// music resumes at 12:00, and generally right before a track boundary (see
+// scheduleLookahead()) so it can be crossfaded into. Nothing in here is
+// meaningful across a restart (each entry is tied to a live in-memory
+// pick), so it's wiped clean at startup below rather than accumulating
+// orphaned files from downloads interrupted mid-flight.
 const PREFETCH_DIR = path.join(import.meta.dir, "..", "data", "workfm-prefetch");
+rm(PREFETCH_DIR, { recursive: true, force: true }).catch(() => {});
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024; // 30MB — generous for an mp3, bounded so uploads can't fill the disk
 const MAX_CHAT_MESSAGES = 100; // per room — oldest messages roll off once exceeded
 const MAX_CHAT_MESSAGE_LENGTH = 500;
@@ -395,6 +413,17 @@ class WorkFmQueueStream {
   // that item starts playing, whether or not it was ever queued during the
   // pause window that downloaded it.
   private prefetchedFiles = new Map<number, string>();
+  // A speculative auto-DJ pick, computed early (see peekAutoDjItem()) so
+  // its audio can start downloading (scheduleLookahead()) while whatever's
+  // currently playing still has time left — consumed by takeAutoDjItem()
+  // once the request queue actually goes empty and it's genuinely this
+  // pick's turn. Keeps pickAutoDjEntry()'s one-shot shuffle-consuming
+  // semantics intact even though it's now sometimes called ahead of time.
+  private pendingAutoDjPick: QueueItem | null = null;
+  // ids currently being downloaded by scheduleLookahead(), so a track
+  // playing for a long time doesn't kick off duplicate downloads of the
+  // same upcoming item.
+  private lookaheadInFlight = new Set<number>();
 
   constructor() {
     this.loadChatState();
@@ -805,7 +834,7 @@ class WorkFmQueueStream {
         await mkdir(SAVED_UPLOADS_DIR, { recursive: true });
         const savedPath = path.join(SAVED_UPLOADS_DIR, `${libraryId.replace(/[^a-zA-Z0-9_-]/g, "")}.mp3`);
         await writeFile(savedPath, bytes);
-        attachSavedUpload(libraryId, savedPath, Date.now() + SAVED_UPLOAD_TTL_MS);
+        await attachSavedUpload(libraryId, savedPath);
       } catch (err) {
         console.error(`[workfm-queue] failed to save upload "${title}" for later:`, err);
       }
@@ -1166,6 +1195,144 @@ class WorkFmQueueStream {
     };
   }
 
+  /** Speculatively picks (and caches) what the auto-DJ would play next,
+   * without waiting for the request queue to actually go empty for real —
+   * so scheduleLookahead() can start downloading it early. Safe to call
+   * repeatedly; only actually consumes a shuffle slot the first time.
+   * Paired with takeAutoDjItem() below, which must be used instead of
+   * pickAutoDjEntry()/buildAutoDjItem() directly once the pick is really
+   * needed, so the same track isn't picked twice. */
+  private peekAutoDjItem(): QueueItem | null {
+    if (this.pendingAutoDjPick === null) {
+      const entry = this.pickAutoDjEntry();
+      this.pendingAutoDjPick = entry ? this.buildAutoDjItem(entry) : null;
+    }
+    return this.pendingAutoDjPick;
+  }
+
+  /** Returns the item peekAutoDjItem() already committed to, if any,
+   * otherwise picks a fresh one — see peekAutoDjItem()'s doc comment. */
+  private takeAutoDjItem(): QueueItem | null {
+    if (this.pendingAutoDjPick !== null) {
+      const item = this.pendingAutoDjPick;
+      this.pendingAutoDjPick = null;
+      return item;
+    }
+    const entry = this.pickAutoDjEntry();
+    return entry ? this.buildAutoDjItem(entry) : null;
+  }
+
+  /** Where a queue item's audio already lives on disk right now, if
+   * anywhere — an upload's file (always local), a youtube item that's
+   * already been fully downloaded ahead of time (see scheduleLookahead()/
+   * prefetchQueue()), or a youtube item that's been permanently cached from
+   * an earlier play/prefetch (see cacheYoutubeDownload()). Null if it'd
+   * still need a live yt-dlp pipe. */
+  private resolveLocalFilePath(item: QueueItem): string | null {
+    if (item.source === "upload") return item.diskPath ?? null;
+    return this.prefetchedFiles.get(item.id) ?? getCachedYoutubeFile(item.libraryId);
+  }
+
+  /**
+   * Fire-and-forget: makes sure `item`'s video ends up in YOUTUBE_CACHE_DIR
+   * even when it's being played live (no prefetched temp file to promote —
+   * see cacheYoutubeDownload()) by kicking an independent background
+   * yt-dlp download straight to the cache. No-op if it's already cached,
+   * or a download for this id is already in flight (e.g. scheduleLookahead()
+   * is already handling it as someone else's "upcoming" track).
+   */
+  private ensureYoutubeCached(item: QueueItem) {
+    if (getCachedYoutubeFile(item.libraryId) || this.lookaheadInFlight.has(item.id)) return;
+    this.lookaheadInFlight.add(item.id);
+    this.downloadYoutubeToFile(item)
+      .then((tempPath) => {
+        if (!tempPath) return;
+        this.cacheYoutubeDownload(item, tempPath).then((cached) => {
+          if (!cached) rm(tempPath, { force: true }).catch(() => {});
+        });
+      })
+      .finally(() => this.lookaheadInFlight.delete(item.id));
+  }
+
+  /**
+   * Promotes a one-shot temp download (from prefetchQueue()'s spisetid
+   * prewarm, scheduleLookahead(), or a first-time live play below) into the
+   * permanent YOUTUBE_CACHE_DIR, so any future requeue of the same video —
+   * from "History"/"Most liked"/"Most played", or just someone pasting the
+   * same link again — plays straight off disk instead of paying for
+   * another yt-dlp download. Best-effort: any failure just means this
+   * particular copy doesn't get reused later (falls back to a fresh
+   * download next time), never breaks current playback. No-op if this
+   * video's already cached from an earlier play/prefetch.
+   */
+  private async cacheYoutubeDownload(item: QueueItem, tempFilePath: string): Promise<boolean> {
+    if (getCachedYoutubeFile(item.libraryId)) return false;
+    try {
+      await mkdir(YOUTUBE_CACHE_DIR, { recursive: true });
+      const cachedPath = path.join(YOUTUBE_CACHE_DIR, `${item.videoId}.mp3`);
+      await rename(tempFilePath, cachedPath);
+      await attachYoutubeCache(
+        {
+          libraryId: item.libraryId,
+          source: "youtube",
+          videoId: item.videoId,
+          url: item.url,
+          artist: item.artist,
+          title: item.title,
+          addedBy: item.addedBy,
+        },
+        cachedPath
+      );
+      return true;
+    } catch (err) {
+      console.error(`[workfm-queue] failed to cache "${item.artist} - ${item.title}" for future requeues:`, err);
+      return false;
+    }
+  }
+
+  /** Downloads one YouTube item's audio straight to disk (shared by
+   * prefetchQueue()'s spisetid prewarm and scheduleLookahead() below).
+   * Best-effort: returns null (rather than throwing) on any failure, so a
+   * failed download just means that track falls back to its normal live
+   * playback path later. */
+  private async downloadYoutubeToFile(item: { url: string; artist: string; title: string }): Promise<string | null> {
+    await mkdir(PREFETCH_DIR, { recursive: true });
+    const id = crypto.randomUUID();
+    const outputTemplate = path.join(PREFETCH_DIR, `${id}.%(ext)s`);
+    const finalPath = path.join(PREFETCH_DIR, `${id}.mp3`);
+    try {
+      const proc = Bun.spawn(
+        ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-x", "--audio-format", "mp3", "--no-playlist", "--quiet", "--no-warnings", "-o", outputTemplate, item.url],
+        { stdout: "pipe", stderr: "pipe" }
+      );
+      const exitCode = await proc.exited;
+      if (exitCode === 0 && (await Bun.file(finalPath).exists())) return finalPath;
+    } catch (err) {
+      console.error(`[workfm-queue] failed to download "${item.artist} - ${item.title}":`, err);
+    }
+    return null;
+  }
+
+  /**
+   * Kicks off a background download of whatever's coming up after the
+   * track that's *about to* start playing — called once per loop()
+   * iteration, right as that track begins — so its audio has that whole
+   * track's duration to arrive on disk. If it makes it in time,
+   * playUpload() below crossfades smoothly into it instead of the usual
+   * silence-bridged hard cut. A no-op for uploads (already local) or if a
+   * download for this id is already in flight/done.
+   */
+  private scheduleLookahead(upcoming: QueueItem | null) {
+    if (!upcoming || upcoming.source !== "youtube") return;
+    if (this.prefetchedFiles.has(upcoming.id) || this.lookaheadInFlight.has(upcoming.id)) return;
+    this.lookaheadInFlight.add(upcoming.id);
+    this.downloadYoutubeToFile(upcoming)
+      .then((filePath) => {
+        if (filePath) this.prefetchedFiles.set(upcoming.id, filePath);
+      })
+      .finally(() => this.lookaheadInFlight.delete(upcoming.id));
+  }
+
   /**
    * Pauses the auto-DJ once the room's been empty (see emptySince) for
    * AUTO_DJ_IDLE_TIMEOUT_MS — no track picked, no ffmpeg/yt-dlp spawned,
@@ -1220,8 +1387,7 @@ class WorkFmQueueStream {
         // item is pushed and immediately shifted below with no `await` in
         // between, so it's never observable in the public queue (see
         // list()/status).
-        const autoEntry = this.pickAutoDjEntry();
-        const autoItem = autoEntry ? this.buildAutoDjItem(autoEntry) : null;
+        const autoItem = this.takeAutoDjItem();
         if (autoItem) {
           this.queue.push(autoItem);
         } else {
@@ -1264,9 +1430,19 @@ class WorkFmQueueStream {
         addedBy: item.addedBy,
       });
       const gen = ++this.currentGen;
+
+      // Whatever's genuinely up next (a real request, or — if the request
+      // queue's empty — the auto-DJ's next speculative pick) starts
+      // downloading now, in the background, so playEntry() below has a
+      // shot at crossfading smoothly into it instead of the usual
+      // silence-bridged hard cut. See scheduleLookahead()'s doc comment.
+      const upcoming = this.queue.length > 0 ? this.queue[0]! : this.peekAutoDjItem();
+      this.scheduleLookahead(upcoming);
+
       let playedFully = false;
+      let handoff: { item: QueueItem; playedFully: boolean } | null = null;
       try {
-        await this.playEntry(item, gen);
+        handoff = await this.playEntry(item, gen, upcoming);
         playedFully = this.currentGen === gen; // false if killPlayback() (skip) fired mid-track
       } catch (err) {
         console.error(`[workfm-queue] failed to play ${item.source === "upload" ? item.title : item.url}:`, err);
@@ -1283,6 +1459,24 @@ class WorkFmQueueStream {
         // addUploadToQueue), so nothing else needs to happen here.
         this.cleanupUpload(item.id).catch(() => {});
       }
+
+      if (handoff) {
+        // playEntry() already crossfaded straight into `upcoming` and
+        // played it all the way out (see playUpload()'s crossfade branch)
+        // — all the "now playing" bookkeeping (current/currentStartedAt/
+        // recordPlay/vote-clearing) for it already happened live, right as
+        // the crossfade began. Just consume it from wherever it was
+        // pending so this loop doesn't play it again from scratch.
+        const consumed = handoff.item;
+        if (this.queue[0]?.id === consumed.id) this.queue.shift();
+        else if (this.pendingAutoDjPick?.id === consumed.id) this.pendingAutoDjPick = null;
+        if (handoff.playedFully && this.repeatArmed) {
+          this.queue.unshift(consumed);
+        } else if (consumed.source === "upload") {
+          this.cleanupUpload(consumed.id).catch(() => {});
+        }
+      }
+
       await this.maybeInsertSpecials();
     }
   }
@@ -1364,7 +1558,6 @@ class WorkFmQueueStream {
     this.spiseTidPrefetchDone = true;
     const targets = this.queue.filter((item) => item.source === "youtube" && !this.prefetchedFiles.has(item.id));
     if (targets.length === 0) return;
-    await mkdir(PREFETCH_DIR, { recursive: true });
 
     const PREFETCH_CONCURRENCY = 2; // modest — this is a courtesy prewarm, not worth hammering yt-dlp/network for
     let cursor = 0;
@@ -1375,21 +1568,8 @@ class WorkFmQueueStream {
         // "Stop spisetid") — no point starting fresh downloads for a
         // prefetch window that's already over.
         if (this.spiseTidPhase !== "pause") return;
-        const id = crypto.randomUUID();
-        const outputTemplate = path.join(PREFETCH_DIR, `${id}.%(ext)s`);
-        const finalPath = path.join(PREFETCH_DIR, `${id}.mp3`);
-        try {
-          const proc = Bun.spawn(
-            ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-x", "--audio-format", "mp3", "--no-playlist", "--quiet", "--no-warnings", "-o", outputTemplate, item.url],
-            { stdout: "pipe", stderr: "pipe" }
-          );
-          const exitCode = await proc.exited;
-          if (exitCode === 0 && (await Bun.file(finalPath).exists())) {
-            this.prefetchedFiles.set(item.id, finalPath);
-          }
-        } catch (err) {
-          console.error(`[workfm-queue] failed to prefetch "${item.artist} - ${item.title}":`, err);
-        }
+        const filePath = await this.downloadYoutubeToFile(item);
+        if (filePath) this.prefetchedFiles.set(item.id, filePath);
       }
     };
     await Promise.all(Array.from({ length: Math.min(PREFETCH_CONCURRENCY, targets.length) }, worker));
@@ -1538,23 +1718,47 @@ class WorkFmQueueStream {
     this.skipVotes.clear();
   }
 
-  private async playEntry(entry: QueueItem, gen: number): Promise<void> {
-    if (entry.source === "upload") return this.playUpload(entry, gen);
+  private async playEntry(
+    entry: QueueItem,
+    gen: number,
+    upcoming?: QueueItem | null
+  ): Promise<{ item: QueueItem; playedFully: boolean } | null> {
+    if (entry.source === "upload") return this.playUpload(entry, gen, upcoming);
 
-    // If this track got downloaded ahead of time during a spisetid pause
-    // window (see prefetchQueue()), play straight off that cached file
-    // instead of piping it live through yt-dlp again — same mechanism as
-    // an uploaded mp3, just with the cache file cleaned up afterwards.
+    // If this track got downloaded ahead of time (spisetid's prefetchQueue()
+    // prewarm, or scheduleLookahead() prepping it as someone else's
+    // "upcoming" track), play straight off that file instead of piping it
+    // live through yt-dlp again — same mechanism as an uploaded mp3.
+    // Promoted into the permanent YOUTUBE_CACHE_DIR afterwards (see
+    // cacheYoutubeDownload()) rather than deleted, unless it's already
+    // cached from an earlier play, in which case the temp copy's just
+    // redundant and gets cleaned up as before.
     const prefetchedPath = this.prefetchedFiles.get(entry.id);
     if (prefetchedPath) {
       this.prefetchedFiles.delete(entry.id);
       try {
-        await this.playUpload({ ...entry, diskPath: prefetchedPath }, gen);
+        return await this.playUpload({ ...entry, diskPath: prefetchedPath }, gen, upcoming);
       } finally {
-        rm(prefetchedPath, { force: true }).catch(() => {});
+        this.cacheYoutubeDownload(entry, prefetchedPath).then((cached) => {
+          if (!cached) rm(prefetchedPath, { force: true }).catch(() => {});
+        });
       }
-      return;
     }
+
+    // Already permanently cached from an earlier play/prefetch — play
+    // straight off that shared file (never deleted afterward; it's meant
+    // to be reused indefinitely).
+    const cachedPath = getCachedYoutubeFile(entry.libraryId);
+    if (cachedPath) return this.playUpload({ ...entry, diskPath: cachedPath }, gen, upcoming);
+
+    // First time this video's ever been played with no lookahead lead time
+    // (e.g. it's the very next thing to play and got requested only just
+    // now) — kick a background download to seed the cache for next time,
+    // in parallel with the live pipe below. Doubles the bandwidth for this
+    // one play, but means every *subsequent* request/requeue of the same
+    // video skips yt-dlp entirely — a one-time cost that pays for itself
+    // the moment it's ever requested again.
+    this.ensureYoutubeCached(entry);
 
     const ytdlp = Bun.spawn(
       ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
@@ -1599,7 +1803,7 @@ class WorkFmQueueStream {
         AUDIO_BYTES_PER_SEC,
         PREBUFFER_BYTES
       );
-      if (this.currentGen !== gen) return; // skipped mid-track
+      if (this.currentGen !== gen) return null; // skipped mid-track
       const [ffExit, ytExit] = await Promise.all([ffmpeg.exited, ytdlp.exited]);
       if (ffExit !== 0 && this.currentGen === gen) {
         const ytErr = (await ytdlpStderr).trim();
@@ -1625,18 +1829,39 @@ class WorkFmQueueStream {
         // already exited
       }
     }
+    // Live-piped tracks never crossfade — see playUpload()'s crossfade
+    // branch, which only kicks in for tracks already sitting on disk.
+    return null;
   }
 
-  /** Plays a locally-uploaded mp3 straight through ffmpeg (no yt-dlp needed). */
-  private async playUpload(entry: QueueItem, gen: number): Promise<void> {
+  /** Plays a locally-uploaded mp3 straight through ffmpeg (no yt-dlp needed).
+   * If `upcoming`'s audio is already sitting on disk (see
+   * scheduleLookahead()/resolveLocalFilePath()) and this track's long
+   * enough to spare it, crosses over into it near the end instead of
+   * cutting to the usual silence bridge — see runCrossfade() — and keeps
+   * playing it out to completion, returning it as a "handoff" so loop()
+   * knows not to play it again from scratch. */
+  private async playUpload(
+    entry: QueueItem,
+    gen: number,
+    upcoming?: QueueItem | null
+  ): Promise<{ item: QueueItem; playedFully: boolean } | null> {
     const filePath = entry.diskPath;
     if (!filePath) throw new Error("uploaded file is missing");
 
+    const upcomingFilePath = upcoming ? this.resolveLocalFilePath(upcoming) : null;
+    const durationSec = entry.durationSec ?? (await probeFileDurationSec(filePath));
+    const canCrossfade = !!upcoming && !!upcomingFilePath && !!durationSec && durationSec > CROSSFADE_SEC * 2;
+    const mainDurationSec = canCrossfade ? durationSec! - CROSSFADE_SEC : null;
+
     // `-re` paces output to real playback speed, same as the YouTube path.
-    const ffmpeg = Bun.spawn(
-      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-i", filePath, "-vn", ...AUDIO_ARGS, "pipe:1"],
-      { stdout: "pipe", stderr: "pipe" }
-    );
+    // `-t` (only set when about to crossfade) stops this main phase short
+    // by CROSSFADE_SEC, so the crossfade below picks up exactly where it
+    // left off instead of the two overlapping.
+    const ffmpegArgs = ["-hide_banner", "-loglevel", "error", "-re", "-i", filePath];
+    if (mainDurationSec != null) ffmpegArgs.push("-t", String(mainDurationSec));
+    ffmpegArgs.push("-vn", ...AUDIO_ARGS, "pipe:1");
+    const ffmpeg = Bun.spawn(["ffmpeg", ...ffmpegArgs], { stdout: "pipe", stderr: "pipe" });
     this.ytdlpProc = null;
     this.ffmpegProc = ffmpeg;
     const ffmpegStderr = drainText(ffmpeg.stderr);
@@ -1649,7 +1874,7 @@ class WorkFmQueueStream {
     try {
       const reader = ffmpeg.stdout.getReader();
       while (true) {
-        if (this.currentGen !== gen) return; // skipped mid-track
+        if (this.currentGen !== gen) return null; // skipped mid-track
         const { done, value } = await reader.read();
         if (done) break;
         if (value && value.length > 0) {
@@ -1674,6 +1899,132 @@ class WorkFmQueueStream {
         // already exited
       }
     }
+
+    if (this.currentGen !== gen || !canCrossfade) return null;
+    return this.crossfadeInto(filePath, durationSec!, upcomingFilePath!, upcoming!, gen);
+  }
+
+  /**
+   * Blends the tail of the track that just finished (in `currentFilePath`)
+   * with the head of `upcoming` (already on disk at `upcomingFilePath`) via
+   * ffmpeg's acrossfade filter, broadcasts that blended segment in place of
+   * the usual silence bridge, then keeps playing `upcoming` out from where
+   * the blend left off, all the way to its natural end (or a skip).
+   * "Now playing" state flips over to `upcoming` right as the blend starts,
+   * same as any other track change. Returns `upcoming` as a handoff once
+   * committed — even if something goes wrong partway through — so loop()
+   * knows it's already been (at least partly) played and shouldn't queue
+   * it up again.
+   */
+  private async crossfadeInto(
+    currentFilePath: string,
+    currentDurationSec: number,
+    upcomingFilePath: string,
+    upcoming: QueueItem,
+    gen: number
+  ): Promise<{ item: QueueItem; playedFully: boolean } | null> {
+    this.current = upcoming;
+    this.currentMetaString = `${upcoming.artist} - ${upcoming.title}`;
+    // It's effectively CROSSFADE_SEC seconds in already once the blend
+    // starts, so the elapsed/total indicator doesn't jump backwards.
+    this.currentStartedAt = Date.now() - CROSSFADE_SEC * 1000;
+    this.skipVotes.clear();
+    this.repeatVotes.clear();
+    this.repeatArmed = false;
+    this.nextVotes.delete(upcoming.id);
+    recordPlay({
+      libraryId: upcoming.libraryId,
+      source: upcoming.source,
+      videoId: upcoming.videoId,
+      url: upcoming.url,
+      artist: upcoming.artist,
+      title: upcoming.title,
+      addedBy: upcoming.addedBy,
+    });
+    // Consumed either way from here on — it's already "now playing".
+    this.prefetchedFiles.delete(upcoming.id);
+
+    const seekSec = Math.max(0, currentDurationSec - CROSSFADE_SEC);
+    const ffmpeg = Bun.spawn(
+      [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        String(seekSec),
+        "-i",
+        currentFilePath,
+        "-i",
+        upcomingFilePath,
+        "-filter_complex",
+        `acrossfade=d=${CROSSFADE_SEC}:curve1=tri:curve2=tri`,
+        "-vn",
+        ...AUDIO_ARGS,
+        "pipe:1",
+      ],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    this.ffmpegProc = ffmpeg;
+    const ffmpegStderr = drainText(ffmpeg.stderr);
+    try {
+      const reader = ffmpeg.stdout.getReader();
+      await relayPaced(reader, (chunk) => this.broadcast(chunk), () => this.currentGen !== gen, AUDIO_BYTES_PER_SEC, 0);
+      const ffExit = await ffmpeg.exited;
+      if (ffExit !== 0 && this.currentGen === gen) {
+        const ffErr = (await ffmpegStderr).trim();
+        console.error(`[workfm-queue] crossfade into "${upcoming.artist} - ${upcoming.title}" failed: ffmpeg exited with code ${ffExit}` + (ffErr ? `\n${ffErr}` : ""));
+      }
+    } catch (err) {
+      console.error(`[workfm-queue] crossfade into "${upcoming.artist} - ${upcoming.title}" failed:`, err);
+    } finally {
+      this.ffmpegProc = null;
+      try {
+        ffmpeg.kill();
+      } catch {
+        // already exited
+      }
+    }
+
+    if (this.currentGen !== gen) {
+      rm(upcomingFilePath, { force: true }).catch(() => {});
+      return { item: upcoming, playedFully: false };
+    }
+
+    // Play the rest of `upcoming`'s file out, starting right after the
+    // portion the crossfade above already covered.
+    const tailFfmpeg = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-ss", String(CROSSFADE_SEC), "-i", upcomingFilePath, "-vn", ...AUDIO_ARGS, "pipe:1"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    this.ffmpegProc = tailFfmpeg;
+    const tailStderr = drainText(tailFfmpeg.stderr);
+    let playedFully = false;
+    try {
+      const reader = tailFfmpeg.stdout.getReader();
+      while (true) {
+        if (this.currentGen !== gen) break; // skipped mid-track — still a genuine (partial) play
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) this.broadcast(value);
+      }
+      playedFully = this.currentGen === gen;
+      const ffExit = await tailFfmpeg.exited;
+      if (ffExit !== 0 && this.currentGen === gen) {
+        const ffErr = (await tailStderr).trim();
+        console.error(`[workfm-queue] post-crossfade playback of "${upcoming.artist} - ${upcoming.title}" failed: ffmpeg exited with code ${ffExit}` + (ffErr ? `\n${ffErr}` : ""));
+      }
+    } finally {
+      this.ffmpegProc = null;
+      try {
+        tailFfmpeg.kill();
+      } catch {
+        // already exited
+      }
+      rm(upcomingFilePath, { force: true }).catch(() => {});
+    }
+
+    return { item: upcoming, playedFully };
   }
 
   /**

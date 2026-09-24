@@ -69,6 +69,9 @@ export function NowPlayingHero({
       <div className="kiosk-hero kiosk-hero-empty">
         <div className="kiosk-hero-label">Now playing</div>
         <div className="kiosk-hero-title">Nothing playing yet</div>
+        <div className="kiosk-hero-standby">
+          We are currently on standby waiting for listeners! The program will proceed once people join.
+        </div>
         {emptyHint && <div className="kiosk-hero-sub">{emptyHint}</div>}
       </div>
     );

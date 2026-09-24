@@ -63,7 +63,23 @@ export async function relayPaced(
     await sleep(50);
   }
 
+  // Flush the whole prebuffer out immediately (as fast as ffmpeg produced
+  // it, not paced at bytesPerSec) rather than dripping it out in real time.
+  // This is what lets a *cold* stream start (nobody was listening, so a
+  // fresh ffmpeg/yt-dlp pair just spun up for the first joiner) hand that
+  // joiner a several-second cushion right away instead of making them wait
+  // out that many real seconds of trickle before their browser has enough
+  // buffered to consider the audio "ready". The real-time pacing below then
+  // takes over cleanly from this point on.
   let sent = 0;
+  while (sent < prebufferBytes && chunks.length > 0) {
+    const head = chunks[0]!;
+    onChunk(head);
+    sent += head.length;
+    bufferedBytes -= head.length;
+    chunks.shift();
+  }
+
   const start = Date.now();
   while (!shouldStop()) {
     const targetBytes = Math.floor(((Date.now() - start) / 1000) * bytesPerSec);

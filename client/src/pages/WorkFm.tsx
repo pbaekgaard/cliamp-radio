@@ -1034,7 +1034,6 @@ function RoomPage({ slug }: { slug: string }) {
       <div className="workfm-now-playing">
         <NowPlayingHero
           item={displayedNowPlaying}
-          emptyHint="Add a video below!"
           controls={
             name && displayedNowPlaying ? (
               <>

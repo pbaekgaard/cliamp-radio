@@ -12,6 +12,8 @@
   --text: #e8ecf3;
   --muted: #8a93a6;
   --danger: #ff6b6b;
+  --warn: #f5c518;
+  --warn-rgb: 245, 197, 24;
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
 }
 
@@ -1817,6 +1819,19 @@ input {
   align-items: center;
   text-align: center;
   gap: 6px;
+  /* Recolors the whole card yellow (border/background/label all derive
+     from --accent/--accent-rgb) — signals "waiting", distinct from the
+     green "actively playing" state and the red spisetid alarm state. */
+  --accent: var(--warn);
+  --accent-rgb: var(--warn-rgb);
+}
+
+.kiosk-hero-standby {
+  color: var(--text);
+  opacity: 0.7;
+  font-size: 16px;
+  font-weight: 500;
+  max-width: 46ch;
 }
 
 .kiosk-hero-special {
