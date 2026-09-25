@@ -12,16 +12,33 @@ import type { WorkFmQueueItem } from "../api";
 //      straight into the OS media notification, which is what's mirrored
 //      over Bluetooth AVRCP to a car stereo's display, and to the phone
 //      lock screen. Safari/iOS supports it too.
-//   2. The document title (tab title) — a much older, blunter mechanism,
-//      but browsers that haven't picked up Media Session metadata yet (or
-//      don't support it) commonly fall back to the tab title for that same
-//      OS media notification. Scrolling it (ticker-style) is a classic
-//      trick for getting a long "Artist - Title" to actually read in the
-//      limited width that fallback gets rendered at.
+//   2. The document title (tab title) — a much older, blunter mechanism
+//      some very old/limited browsers fall back to for that same OS media
+//      notification when Media Session isn't supported at all.
 //
-// Both are updated here together, off the same synced now-playing item
-// (see useSyncedNowPlaying) so neither drifts out of step with what's
-// actually audible.
+// Deliberately *not* both at once on a Media-Session-capable browser: doing
+// so caused garbled/mashed-up car-stereo displays in practice (e.g.
+// "ANNOUNCEMENT * CLIAMP...", "* deadmau5") — some Bluetooth/AVRCP bridges
+// blend the ticking tab title into the same notification as the Media
+// Session fields instead of picking one, once every few hundred ms as the
+// ticker updates. So the tab-title ticker only runs as a genuine fallback,
+// on browsers where `navigator.mediaSession` doesn't exist at all.
+//
+// That same garbled text turned out to have a second cause: `item` (the
+// audio-synced now-playing item) is legitimately `null` for brief windows
+// while still actively `playing` — e.g. the gap between two tracks, or
+// while the server is streaming encoded filler silence because nothing's
+// queued yet (see workfmQueue.ts's playSilence()). Chromium (and likely
+// other browsers) don't just leave the OS media notification blank when
+// `mediaSession.metadata` is null but the tab's audio is still flowing —
+// they synthesize *fallback* metadata from the page's own <title> and
+// origin instead. Nulling metadata during those transient gaps was exactly
+// what produced the mashed-together "real track title/artist molded with
+// the site's tab title" garbage reported from car Bluetooth displays and
+// the desktop bar alike. So metadata is only ever cleared once `active`
+// itself goes false (i.e. actually stopped/tuned out) — while still
+// playing, a momentary lack of a synced item just leaves whatever
+// metadata was last set in place rather than nulling it out.
 
 const TICKER_SEPARATOR = "   •   ";
 const TICKER_INTERVAL_MS = 350;
@@ -59,10 +76,18 @@ export function useNowPlayingMediaMetadata(item: WorkFmQueueItem | null, active:
       }
     }
 
-    if (!active || !item) {
+    if (!active) {
       clearTicker();
       document.title = defaultTitle();
       if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
+      return;
+    }
+
+    if (!item) {
+      // Still playing (e.g. a brief gap between tracks, or filler silence
+      // with nothing queued yet) — deliberately leave the previous
+      // metadata/title in place rather than nulling it. See the block
+      // comment above for why nulling here caused the garbled displays.
       return;
     }
 
