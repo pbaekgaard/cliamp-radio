@@ -3,6 +3,12 @@ import { api, type PlaylistStreamStatus, type Station } from "../api";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { extractYouTubePlaylistId, tuneInUrlForTrack } from "../youtube";
 
+// Matches server/lib/stations.ts's WORKFM_STATION_SLUG. WorkFM's own
+// browser listener count (WebSocket room presence) is accurate; the
+// cliamp/M3U-request heuristic below is not (it just reflects whoever last
+// fetched the .m3u, TTL'd for hours) and shouldn't be shown for it.
+const WORKFM_STATION_SLUG = "workfm-radio";
+
 // Matches server/lib/stations.ts's HEADER_PLACEHOLDER_URL — the inert
 // divider entries injected between each station's tracks in the
 // auto-generated "All Stations" playlist. Filtered out of the track
@@ -154,6 +160,7 @@ export default function StationList() {
           const stationPlaylistIds = new Set(
             tracks.map((t) => extractYouTubePlaylistId(t.path)).filter((id): id is string => !!id)
           );
+          const isWorkFm = s.slug === WORKFM_STATION_SLUG;
           const n =
             stationPlaylistIds.size > 0
               ? [...stationPlaylistIds].reduce((sum, id) => sum + (playlistStatuses[id]?.listeners ?? 0), 0)
@@ -179,10 +186,12 @@ export default function StationList() {
                   <div className="station-config-name">
                     {s.name}
                     {s.virtual && <span className="badge">auto-generated</span>}
-                    <span className={`station-listener-count${n > 0 ? " live" : ""}`}>
-                      <span className={`live-dot${n > 0 ? "" : " idle"}`} />
-                      {n} listening
-                    </span>
+                    {!isWorkFm && (
+                      <span className={`station-listener-count${n > 0 ? " live" : ""}`}>
+                        <span className={`live-dot${n > 0 ? "" : " idle"}`} />
+                        {n} listening
+                      </span>
+                    )}
                   </div>
                   <code className="station-config-url">/cliamp-radio/{s.slug}.m3u</code>
                 </div>

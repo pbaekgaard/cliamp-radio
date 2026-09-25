@@ -1,8 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "./api";
+import { useAuth } from "./AuthContext";
 
 interface WorkFmState {
   name: string | null;
+  /** Whether `name` is the site admin's own WorkFM identity (auto-assigned,
+   * no "join" needed — see server's resolveWorkFmIdentity()). Drives the
+   * crown badge next to their name in chat/member lists. */
+  isAdmin: boolean;
   /** Which room `name` was picked for. Restoring a session (see
    * WorkFmProvider) doesn't know this on its own — RoomPage binds it via
    * `bindRoom` once it mounts with a known slug, since WorkFM only ever has
@@ -29,25 +34,46 @@ export function WorkFmProvider({ children }: { children: ReactNode }) {
   // gates WorkFm's initial render (see WorkFm() below) so the join modal
   // doesn't flash before this resolves.
   const [name, setName] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // An admin's WorkFM identity is auto-assigned from their admin session
+  // (see server's resolveWorkFmIdentity()) rather than a cookie — but
+  // logging in/out is a client-side state change (AuthContext's
+  // `username`), not a page reload, so without re-checking here on that
+  // change, someone who logs in as admin and navigates straight to WorkFM
+  // (no refresh) would still see the old "Join" prompt from before they
+  // were authenticated.
+  const { username } = useAuth();
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await api.workfmMe();
+        if (cancelled) return;
         setName(res.name);
+        setIsAdmin(!!res.isAdmin);
       } catch {
-        // No valid session cookie — stays anonymous until they join.
+        // No valid session (anonymous, or an admin who just logged out) —
+        // reset rather than leaving a stale identity from before.
+        if (!cancelled) {
+          setName(null);
+          setIsAdmin(false);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [username]);
 
   async function identify(newName: string, slug: string) {
     const res = await api.workfmIdentify(newName);
     setName(res.name);
+    setIsAdmin(!!res.isAdmin);
     setRoomSlug(slug);
   }
 
@@ -58,11 +84,12 @@ export function WorkFmProvider({ children }: { children: ReactNode }) {
   async function forget() {
     await api.workfmLogout();
     setName(null);
+    setIsAdmin(false);
     setRoomSlug(null);
   }
 
   return (
-    <WorkFmContext.Provider value={{ name, roomSlug, loading, identify, bindRoom, forget }}>
+    <WorkFmContext.Provider value={{ name, isAdmin, roomSlug, loading, identify, bindRoom, forget }}>
       {children}
     </WorkFmContext.Provider>
   );

@@ -249,6 +249,12 @@ interface ChatMessage {
    * messages" on rename (see renameChatAuthor); never shown to clients as
    * anything meaningful on its own. Absent for system markers. */
   authorId?: string;
+  /** Whether the sender was the site admin, baked in at post time (like
+   * `color`) so a later admin rename/handoff doesn't repaint history. Lets
+   * clients render a crown next to the admin's messages — see
+   * server/lib/auth.ts's getAdminWorkFmIdentity() and index.ts's
+   * resolveWorkFmIdentity(). */
+  isAdmin?: boolean;
 }
 
 interface Subscriber {
@@ -681,12 +687,12 @@ class WorkFmQueueStream {
     }));
   }
 
-  list(viewerName?: string): {
+  list(viewerName?: string, adminName?: string): {
     nowPlaying: (QueueItem & { likes: number; likedByMe: boolean; startedAt: number | null }) | null;
     queue: (QueueItem & { likes: number; likedByMe: boolean; nextVote: { votes: number; total: number; hasVoted: boolean } })[];
     listeners: string[];
     anonymousListeners: number;
-    members: { name: string; listening: boolean; color: string }[];
+    members: { name: string; listening: boolean; color: string; isAdmin: boolean }[];
     leaderboard: ReturnType<WorkFmQueueStream["roomLeaderboard"]>;
     mostPlayed: ReturnType<WorkFmQueueStream["roomMostPlayed"]>;
     skipVote: { votes: number; total: number; hasVoted: boolean };
@@ -698,7 +704,12 @@ class WorkFmQueueStream {
     const listeners = this.listenerNames();
     const listening = new Set(listeners);
     const activeMembers = this.activeMemberNames();
-    const members = activeMembers.map((name) => ({ name, listening: listening.has(name), color: getColorForName(name) }));
+    const members = activeMembers.map((name) => ({
+      name,
+      listening: listening.has(name),
+      color: getColorForName(name),
+      isAdmin: !!adminName && name.toLowerCase() === adminName.toLowerCase(),
+    }));
     return {
       nowPlaying: this.current ? { ...this.withLikes(this.current, viewerName), startedAt: this.currentStartedAt } : null,
       // Same defensive filter as status's queueLength above — auto-DJ picks
@@ -735,11 +746,11 @@ class WorkFmQueueStream {
    * sender's stable per-session identity, not their display name) is
    * stamped on so a later rename can find and update this message — see
    * renameChatAuthor(). */
-  postChatMessage(name: string, text: string, authorId?: string): ChatMessage {
+  postChatMessage(name: string, text: string, authorId?: string, isAdmin = false): ChatMessage {
     this.pruneExpiredChat();
     const trimmed = text.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
     if (!trimmed) throw new Error("message can't be empty");
-    const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now(), color: getColorForName(name), authorId };
+    const message: ChatMessage = { id: this.nextChatId++, name, text: trimmed, at: Date.now(), color: getColorForName(name), authorId, isAdmin };
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
     this.saveChatState();

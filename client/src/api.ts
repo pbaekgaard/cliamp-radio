@@ -132,6 +132,9 @@ export interface WorkFmChatMessage {
    * Render as a dimmed divider, not a chat bubble. Legacy `true` (from
    * before "song"/"rename" existed) means "song". */
   system?: boolean | "song" | "rename";
+  /** Whether the sender was the site admin — see server/lib/auth.ts's
+   * getAdminWorkFmIdentity(). Render a crown next to their name. */
+  isAdmin?: boolean;
 }
 
 export interface WorkFmSkipVoteState {
@@ -160,6 +163,10 @@ export interface WorkFmMember {
   listening: boolean;
   /** Chat name color — see server/lib/workfmColors.ts. */
   color: string;
+  /** Whether this member is the site admin — see
+   * server/lib/auth.ts's getAdminWorkFmIdentity(). Render a crown next to
+   * their name. */
+  isAdmin: boolean;
 }
 
 export interface WorkFmLeaderboardEntry {
@@ -312,8 +319,8 @@ export const api = {
   },
 
   // --- WorkFM ---
-  workfmIdentify: (name: string) => request<{ name: string }>("/api/workfm/identify", { method: "POST", body: JSON.stringify({ name }) }),
-  workfmMe: () => request<{ name: string; color: string }>("/api/workfm/me"),
+  workfmIdentify: (name: string) => request<{ name: string; isAdmin?: boolean }>("/api/workfm/identify", { method: "POST", body: JSON.stringify({ name }) }),
+  workfmMe: () => request<{ name: string; color: string; isAdmin?: boolean }>("/api/workfm/me"),
   workfmLogout: () => request("/api/workfm/logout", { method: "POST" }),
   workfmSetColor: (color: string) => request<{ color: string }>("/api/workfm/color", { method: "POST", body: JSON.stringify({ color }) }),
   workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),

@@ -996,6 +996,9 @@ export function MembersPanel({
         {members.map((m) => (
           <li key={m.name} className="workfm-listener-row">
             <span>
+              {m.isAdmin && (
+                <span className="workfm-admin-crown" title="Admin">👑</span>
+              )}
               <span style={{ color: m.color }}>{m.name}</span>
               {name && m.name.toLowerCase() === name.toLowerCase() && (
                 <span className="workfm-you-tag">You</span>
@@ -1129,6 +1132,29 @@ function ChatSettingsPanel({
 // "https://" for a link to become clickable.
 const URL_TOKEN_RE = /^(https?:\/\/\S+|www\.\S+)$/i;
 
+// Emote names are case-sensitive keys in the emotes map (e.g. "PogChamp"),
+// but chatters don't reliably type (or send) the exact casing the
+// autocomplete suggested — e.g. typing "dance" and hitting Enter straight
+// away, without Tab-accepting the suggested "Dance", sent the literal
+// lowercase text, which then failed the exact-case lookup below and never
+// rendered as an emote even though autocomplete clearly recognized it.
+// This builds a lowercase-keyed fallback index once per emotes map (cached
+// by reference, not rebuilt per message) so a case-insensitive match still
+// resolves to the right emote.
+const lowerEmoteIndexCache = new WeakMap<Map<string, ChatEmote>, Map<string, ChatEmote>>();
+function lowerEmoteIndex(emotes: Map<string, ChatEmote>): Map<string, ChatEmote> {
+  let index = lowerEmoteIndexCache.get(emotes);
+  if (!index) {
+    index = new Map();
+    for (const emote of emotes.values()) {
+      const lower = emote.name.toLowerCase();
+      if (!index.has(lower)) index.set(lower, emote);
+    }
+    lowerEmoteIndexCache.set(emotes, index);
+  }
+  return index;
+}
+
 /** Splits a chat message on whitespace and swaps any whole-word token
  * that's either an emote name (7TV, Twitch, or BTTV global/top charts) or
  * a URL for, respectively, its image or a clickable link — same convention
@@ -1139,7 +1165,7 @@ export function renderChatText(
 ): React.ReactNode {
   const parts = text.split(/(\s+)/);
   return parts.map((part, i) => {
-    const emote = emotes?.get(part);
+    const emote = emotes?.get(part) ?? (emotes ? lowerEmoteIndex(emotes).get(part.toLowerCase()) : undefined);
     if (emote) {
       return <EmoteImage key={i} token={part} emote={emote} />;
     }
@@ -1695,7 +1721,9 @@ export function ChatPanel({
                 <span>{m.text}</span>
               </li>
             ) : (
-              <li key={m.id} className="workfm-chat-row">                <strong style={{ color: m.color }}>{m.name.toLowerCase()}</strong>: <span>{renderChatText(m.text, displayEmotes)}</span>
+              <li key={m.id} className="workfm-chat-row">
+                {m.isAdmin && <span className="workfm-admin-crown" title="Admin">👑</span>}
+                <strong style={{ color: m.color }}>{m.name.toLowerCase()}</strong>: <span>{renderChatText(m.text, displayEmotes)}</span>
               </li>
             )
           )}

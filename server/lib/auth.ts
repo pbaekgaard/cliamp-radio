@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -50,6 +50,14 @@ interface Credentials {
   username: string;
   passwordHash: string;
   mustChangePassword: boolean;
+  /** The admin's own WorkFM display name/identity id — see
+   * getAdminWorkFmIdentity(). Stored here (not in the workfm_identity
+   * cookie like everyone else's) so the admin is always "logged in" to
+   * WorkFM on any device the moment they're logged in as admin, and a
+   * rename persists across devices/cookie clears instead of being tied to
+   * one browser session. */
+  workfmName?: string;
+  workfmId?: string;
 }
 
 let cache: Credentials | null = null;
@@ -145,4 +153,28 @@ export function getTokenFromRequest(req: Request): string | undefined {
 
 export function requireAuth(req: Request): { sub: string } | null {
   return verifySessionToken(getTokenFromRequest(req));
+}
+
+/** The admin's own stable WorkFM identity — auto-provisioned (defaulting
+ * the display name to the admin username) the first time it's needed, so
+ * there's always one to hand back without ever prompting. See
+ * server/index.ts's resolveWorkFmIdentity(), which gives this priority
+ * over any workfm_identity cookie whenever the caller has a valid admin
+ * session. */
+export async function getAdminWorkFmIdentity(): Promise<{ name: string; id: string }> {
+  const creds = await loadCredentials();
+  if (creds.workfmName && creds.workfmId) return { name: creds.workfmName, id: creds.workfmId };
+  const name = creds.workfmName || creds.username;
+  const id = creds.workfmId || randomUUID();
+  await saveCredentials({ ...creds, workfmName: name, workfmId: id });
+  return { name, id };
+}
+
+/** Renames the admin's WorkFM identity — keeps the same `id` (see
+ * getAdminWorkFmIdentity) so past chat messages can still be found and
+ * updated by the caller (server/index.ts's /api/workfm/identify handler,
+ * mirroring renameChatAuthor() for ordinary WorkFM sessions). */
+export async function setAdminWorkFmName(name: string): Promise<void> {
+  const creds = await loadCredentials();
+  await saveCredentials({ ...creds, workfmName: name });
 }

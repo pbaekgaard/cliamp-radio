@@ -3,9 +3,11 @@ import path from "node:path";
 import {
   changePassword,
   createSessionToken,
+  getAdminWorkFmIdentity,
   getMustChangePassword,
   requireAuth,
   SESSION_COOKIE,
+  setAdminWorkFmName,
   verifyCredentials,
 } from "./lib/auth";
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
@@ -74,6 +76,20 @@ function clientIp(req: Request, server: Bun.Server): string {
   return addr?.address || "0.0.0.0";
 }
 
+/** WorkFM identity, admin-aware: an admin session (cliamp_session cookie)
+ * always wins over any workfm_identity cookie, handing back the admin's
+ * own persisted WorkFM identity (see getAdminWorkFmIdentity()) rather than
+ * requiring them to "join" like an ordinary visitor. Falls back to the
+ * regular cookie-based identity — or null (never identified) — otherwise. */
+async function resolveWorkFmIdentity(req: Request): Promise<{ name: string; id: string; isAdmin: boolean } | null> {
+  if (requireAuth(req)) {
+    const identity = await getAdminWorkFmIdentity();
+    return { ...identity, isAdmin: true };
+  }
+  const identity = getWorkFmIdentity(req);
+  return identity ? { ...identity, isAdmin: false } : null;
+}
+
 const server = Bun.serve({
   port: PORT,
   hostname: "0.0.0.0",
@@ -90,7 +106,7 @@ const server = Bun.serve({
       const room = getWorkFmRoom(decodeURIComponent(workfmAudioMatch[1]!));
       if (!room) return new Response("Room not found", { status: 404 });
       const wantsMeta = req.headers.get("icy-metadata") === "1";
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       const stream = room.stream.subscribe(wantsMeta, identity?.name);
       const headers: Record<string, string> = {
         "Content-Type": "audio/mpeg",
@@ -240,6 +256,23 @@ const server = Bun.serve({
       const body = await req.json().catch(() => null);
       const name = typeof body?.name === "string" ? normalizeWorkFmName(body.name) : null;
       if (!name) return json({ error: "a name (1-24 characters) is required" }, { status: 400 });
+
+      // An admin never needs to "join" — see resolveWorkFmIdentity() — but
+      // can still rename here (same endpoint the settings panel always
+      // uses). Persist it against the admin account itself rather than a
+      // cookie, so it survives across devices/cookie clears.
+      if (requireAuth(req)) {
+        const existing = await getAdminWorkFmIdentity();
+        if (existing.name !== name) {
+          await setAdminWorkFmName(name);
+          const room = getWorkFmRoom(WORKFM_ROOM_SLUG);
+          room?.stream.renameChatAuthor(existing.id, name);
+          room?.stream.pushRenameChatMarker(existing.name, name);
+          renameColorOverride(existing.name, name);
+        }
+        return json({ name, isAdmin: true });
+      }
+
       // Reuse the existing session's identity id across a rename (rather
       // than minting a fresh one) so their past chat messages can be
       // updated to the new name below — see renameChatAuthor().
@@ -252,7 +285,7 @@ const server = Bun.serve({
         renameColorOverride(existing.name, name);
       }
       return json(
-        { name },
+        { name, isAdmin: false },
         {
           headers: {
             "Set-Cookie": `${WORKFM_SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax`,
@@ -262,13 +295,13 @@ const server = Bun.serve({
     }
 
     if (pathname === "/api/workfm/me" && req.method === "GET") {
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
-      return json({ name: identity.name, color: getColorForName(identity.name) });
+      return json({ name: identity.name, color: getColorForName(identity.name), isAdmin: identity.isAdmin });
     }
 
     if (pathname === "/api/workfm/color" && req.method === "POST") {
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const body = await req.json().catch(() => null);
       const color = typeof body?.color === "string" ? body.color : null;
@@ -291,14 +324,15 @@ const server = Bun.serve({
     if (workfmRoomQueueMatch && req.method === "GET") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
-      return json({ ...room.stream.list(identity?.name), roomName: room.name });
+      const identity = await resolveWorkFmIdentity(req);
+      const adminIdentity = await getAdminWorkFmIdentity();
+      return json({ ...room.stream.list(identity?.name, adminIdentity.name), roomName: room.name });
     }
 
     if (workfmRoomQueueMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const body = await req.json().catch(() => null);
       if (typeof body?.url !== "string" || !body.url.trim()) {
@@ -316,7 +350,7 @@ const server = Bun.serve({
     if (workfmRoomSearchMatch && req.method === "GET") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomSearchMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const q = url.searchParams.get("q")?.trim() ?? "";
       if (!q) return json({ results: [] });
@@ -350,7 +384,7 @@ const server = Bun.serve({
     if (workfmRoomUploadMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomUploadMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const formData = await req.formData().catch(() => null);
       const file = formData?.get("file");
@@ -375,7 +409,7 @@ const server = Bun.serve({
     if (workfmRoomQueueItemMatch && req.method === "DELETE") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueItemMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const result = room.stream.removeFromQueue(Number(workfmRoomQueueItemMatch[2]), identity.name);
       return result.ok ? json({ ok: true }) : json({ error: result.error }, { status: 400 });
@@ -385,7 +419,7 @@ const server = Bun.serve({
     if (workfmRoomQueueVoteNextMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueueVoteNextMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const result = room.stream.requestMoveToFront(Number(workfmRoomQueueVoteNextMatch[2]), identity.name);
       return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
@@ -395,7 +429,7 @@ const server = Bun.serve({
     if (workfmRoomSkipMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomSkipMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const result = room.stream.requestSkip(identity.name);
       return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
@@ -405,7 +439,7 @@ const server = Bun.serve({
     if (workfmRoomRepeatMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomRepeatMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const result = room.stream.requestRepeat(identity.name);
       return result.ok ? json(result) : json({ error: result.error }, { status: 400 });
@@ -415,14 +449,14 @@ const server = Bun.serve({
     if (workfmRoomChatMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomChatMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const body = await req.json().catch(() => null);
       if (typeof body?.text !== "string" || !body.text.trim()) {
         return json({ error: "message can't be empty" }, { status: 400 });
       }
       try {
-        const message = room.stream.postChatMessage(identity.name, body.text, identity.id);
+        const message = room.stream.postChatMessage(identity.name, body.text, identity.id, identity.isAdmin);
         return json(message, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to send message" }, { status: 400 });
@@ -433,7 +467,7 @@ const server = Bun.serve({
     if (workfmRoomRequeueMatch && req.method === "POST") {
       const room = getWorkFmRoom(decodeURIComponent(workfmRoomRequeueMatch[1]!));
       if (!room) return json({ error: "room not found" }, { status: 404 });
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const body = await req.json().catch(() => null);
       if (typeof body?.id !== "string" || !body.id.trim()) {
@@ -451,7 +485,7 @@ const server = Bun.serve({
 
     // --- WorkFM library (history / most-liked / saved uploads — global, across all rooms) ---
     if (pathname === "/api/workfm/library" && req.method === "GET") {
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       const view = url.searchParams.get("view") ?? "history";
       if (view === "most-liked") return json(listMostLiked(identity?.name));
       if (view === "saved") return json(listSavedUploads(identity?.name));
@@ -460,7 +494,7 @@ const server = Bun.serve({
 
     const workfmLikeMatch = pathname.match(/^\/api\/workfm\/library\/([^/]+)\/like$/);
     if (workfmLikeMatch && req.method === "POST") {
-      const identity = getWorkFmIdentity(req);
+      const identity = await resolveWorkFmIdentity(req);
       if (!identity) return unauthorized();
       const result = toggleLike(decodeURIComponent(workfmLikeMatch[1]!), identity.name);
       if (!result) return json({ error: "track not found" }, { status: 404 });
