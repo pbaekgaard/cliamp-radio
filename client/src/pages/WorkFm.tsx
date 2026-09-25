@@ -22,6 +22,7 @@ import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
 import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
+import { useNowPlayingMediaMetadata } from "../lib/useNowPlayingMediaMetadata";
 import { useChatEmotes, type ChatEmote } from "../lib/chatEmotes";
 import { CHAT_NAME_COLORS } from "../lib/chatColors";
 import { looksLikeEmoteToken, resolveSevenTvEmoteByName, searchSevenTvEmotesLive } from "../lib/sevenTv";
@@ -2096,6 +2097,28 @@ function RoomPage({ slug }: { slug: string }) {
     playing,
     streamUrl,
   );
+  // Surfaces artist/title to the OS media notification (car Bluetooth
+  // displays, phone lock screens, desktop media widgets) since the
+  // <audio> element itself can't expose ICY metadata to those — see the
+  // hook's own comment for why both mechanisms are needed.
+  useNowPlayingMediaMetadata(displayedNowPlaying, playing);
+  // Lets a hardware/lock-screen/Bluetooth play-pause button control
+  // playback the same as the in-page button, instead of doing nothing (or
+  // controlling some other tab entirely).
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.setActionHandler("play", () => {
+      if (playing) return;
+      play(streamUrl, "Radio Bækgaard");
+    });
+    navigator.mediaSession.setActionHandler("pause", () => stop());
+    navigator.mediaSession.setActionHandler("stop", () => stop());
+    return () => {
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("stop", null);
+    };
+  }, [playing, play, stop, streamUrl]);
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
