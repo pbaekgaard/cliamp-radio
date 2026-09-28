@@ -2324,6 +2324,16 @@ class WorkFmQueueStream {
     // It's effectively CROSSFADE_SEC seconds in already once the blend
     // starts, so the elapsed/total indicator doesn't jump backwards.
     this.currentStartedAt = Date.now() - CROSSFADE_SEC * 1000;
+    // `upcoming` is "now playing" as of this instant, but playUpload()'s
+    // caller (loop()) won't get a chance to shift it out of `this.queue`
+    // until this whole crossfade + tail playback finishes — which can be
+    // its entire multi-minute runtime. Left in place that long, it'd show
+    // up as still queued (in list()/status) right alongside "now playing"
+    // for the whole track, looking like it's stuck in the queue / about to
+    // play again. Consume it from wherever it's pending right away instead;
+    // loop()'s own post-handoff removal becomes a no-op once this has run.
+    if (this.queue[0]?.id === upcoming.id) this.queue.shift();
+    else if (this.pendingAutoDjPick?.id === upcoming.id) this.pendingAutoDjPick = null;
     this.skipVotes.clear();
     this.repeatVotes.clear();
     this.repeatArmed = false;
