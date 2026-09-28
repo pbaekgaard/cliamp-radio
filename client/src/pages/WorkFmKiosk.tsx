@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type WorkFmChatMessage, type WorkFmQueueItem, type WorkFmQueueState } from "../api";
 import { NowPlayingHero } from "../components/NowPlayingHero";
 import { SpiseTidOverlay } from "../components/SpiseTidOverlay";
 import { useChatEmotes } from "../lib/chatEmotes";
+import { useWorkFmLiveState } from "../lib/useWorkFmLiveState";
 import { renderChatText } from "./WorkFm";
 
 /** WorkFM's single persistent room slug — matches WORKFM_ROOM_SLUG in
@@ -87,26 +88,36 @@ export default function WorkFmKiosk() {
   const [roomMissing, setRoomMissing] = useState(false);
   const now = useNow();
 
+  // Initial fetch so there's something to render immediately; live updates
+  // afterwards arrive over the same push-based WebSocket /workfm itself
+  // uses (see useWorkFmLiveState) instead of a fixed-interval poll — this
+  // is what makes the kiosk update in lockstep with /workfm now, rather
+  // than noticeably ahead of it.
   useEffect(() => {
     let cancelled = false;
-    async function poll() {
-      try {
-        const res = await api.workfmQueue(WORKFM_ROOM_SLUG);
+    api
+      .workfmQueue(WORKFM_ROOM_SLUG)
+      .then((res) => {
         if (!cancelled) {
           setState(res);
           setRoomMissing(false);
         }
-      } catch {
+      })
+      .catch(() => {
         if (!cancelled) setRoomMissing(true);
-      }
-    }
-    poll();
-    const id = setInterval(poll, 1500);
+      });
     return () => {
       cancelled = true;
-      clearInterval(id);
     };
   }, []);
+  useWorkFmLiveState(
+    WORKFM_ROOM_SLUG,
+    useCallback((res) => {
+      setState(res);
+      setRoomMissing(false);
+    }, []),
+    useCallback(() => setRoomMissing(true), []),
+  );
 
   const listenerCount = state.members.length + state.anonymousListeners;
   const upNext = state.queue.slice(0, 5);

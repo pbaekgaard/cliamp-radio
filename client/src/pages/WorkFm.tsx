@@ -21,7 +21,7 @@ import {
 import { readId3Tags, titleFromFilename } from "../id3";
 import { useWorkFm } from "../WorkFmContext";
 import { useRadioPlayer } from "../RadioPlayerContext";
-import { useSyncedNowPlaying } from "../lib/useSyncedNowPlaying";
+import { useWorkFmLiveState } from "../lib/useWorkFmLiveState";
 import { useNowPlayingMediaMetadata } from "../lib/useNowPlayingMediaMetadata";
 import { useChatEmotes, type ChatEmote } from "../lib/chatEmotes";
 import { CHAT_NAME_COLORS } from "../lib/chatColors";
@@ -2089,18 +2089,15 @@ function RoomPage({ slug }: { slug: string }) {
     useRadioPlayer();
   const streamUrl = `/cliamp-radio/live/workfm/${slug}.mp3`;
   const playing = nowPlaying?.url === streamUrl;
-  // Lags behind state.nowPlaying until it's actually about to be audible —
-  // see useSyncedNowPlaying's comment. Used for the "now playing" card
-  // instead of state.nowPlaying directly.
-  const displayedNowPlaying = useSyncedNowPlaying(
-    state.nowPlaying,
-    playing,
-    streamUrl,
-  );
+  // No more separate audio-sync delay/ICY-timeline hack — the low-latency
+  // WebSocket+PCM path (see RadioPlayerContext's connectLowLatency()) is
+  // fast enough end-to-end (sub-second) that state.nowPlaying itself is
+  // close enough to "what's actually audible right now" to show directly.
+  const displayedNowPlaying = state.nowPlaying;
   // Surfaces artist/title to the OS media notification (car Bluetooth
   // displays, phone lock screens, desktop media widgets) since the
-  // <audio> element itself can't expose ICY metadata to those — see the
-  // hook's own comment for why both mechanisms are needed.
+  // low-latency audio graph can't expose that itself — see the hook's own
+  // comment for why both mechanisms are needed.
   useNowPlayingMediaMetadata(displayedNowPlaying, playing);
   // Lets a hardware/lock-screen/Bluetooth play-pause button control
   // playback the same as the in-page button, instead of doing nothing (or
@@ -2109,7 +2106,7 @@ function RoomPage({ slug }: { slug: string }) {
     if (!("mediaSession" in navigator)) return;
     navigator.mediaSession.setActionHandler("play", () => {
       if (playing) return;
-      play(streamUrl, "Radio Bækgaard");
+      play(streamUrl, "Radio Bækgaard", { lowLatencySlug: slug });
     });
     navigator.mediaSession.setActionHandler("pause", () => stop());
     navigator.mediaSession.setActionHandler("stop", () => stop());
@@ -2118,7 +2115,7 @@ function RoomPage({ slug }: { slug: string }) {
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("stop", null);
     };
-  }, [playing, play, stop, streamUrl]);
+  }, [playing, play, stop, streamUrl, slug]);
   const navigate = useNavigate();
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -2218,12 +2215,23 @@ function RoomPage({ slug }: { slug: string }) {
     }
   }, [slug]);
 
+  // Real-time push (see useWorkFmLiveState's own comment) — replaces the
+  // old fixed-interval poll for chat/queue/votes/listeners/now-playing.
+  // `poll` above is kept as the one-time initial fetch (so there's
+  // something to render before the socket finishes connecting) and as the
+  // hook's own REST fallback if WebSocket upgrades can't get through at
+  // all.
   useEffect(() => {
     poll();
-    // Poll fairly often so chat and the queue feel close to real-time.
-    const id = setInterval(poll, 1500);
-    return () => clearInterval(id);
   }, [poll]);
+  useWorkFmLiveState(
+    slug,
+    useCallback((res) => {
+      setState(res);
+      setRoomMissing(false);
+    }, []),
+    useCallback(() => setRoomMissing(true), []),
+  );
 
   async function addToQueue(e: React.FormEvent) {
     e.preventDefault();
@@ -2403,7 +2411,7 @@ function RoomPage({ slug }: { slug: string }) {
           <>
             <button
               className="btn-secondary"
-              onClick={() => toggle(streamUrl, "Radio Bækgaard")}
+              onClick={() => toggle(streamUrl, "Radio Bækgaard", { lowLatencySlug: slug })}
             >
               {playing ? "Pause stream" : "▶ Listen in"}
             </button>
@@ -2422,7 +2430,7 @@ function RoomPage({ slug }: { slug: string }) {
             // so kick off playback right here (before the await) rather
             // than making the visitor separately press "Listen in"
             // afterwards — most people joining a room want to hear it.
-            play(streamUrl, "Radio Bækgaard");
+            play(streamUrl, "Radio Bækgaard", { lowLatencySlug: slug });
             await identify(yourName, slug);
           }}
         />

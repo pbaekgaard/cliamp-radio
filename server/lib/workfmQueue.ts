@@ -72,6 +72,26 @@ const CROSSFADE_SEC = 3;
 // extra silent gap at every track change — this only controls the one-time
 // wait before a *newly started* track's first bytes go out at all.
 const PREBUFFER_BYTES = AUDIO_BYTES_PER_SEC * 2;
+// --- Real-time WebSocket channel (state push + low-latency PCM audio) ---
+// Alongside the legacy HTTP MP3/ICY pipeline above (kept untouched for any
+// existing direct consumer of the raw stream URL), every /workfm page and
+// kiosk now holds one persistent WebSocket to its room (see attachWs()/
+// index.ts's websocket handler) that pushes JSON state the instant
+// something changes instead of waiting to be polled, and — once a listener
+// opts in with a "listen" message — a continuous raw PCM audio feed with a
+// far smaller buffer than the MP3/ICY path, for sub-second "skip it and
+// hear it" latency. Sent as raw s16le PCM rather than a compressed codec
+// (Opus, etc.) to avoid needing a client-side decoder/container demuxer at
+// all — just bytes straight into a Web Audio AudioWorklet — at the cost of
+// substantially more bandwidth per listener (~192KB/s); fine for this
+// station's small, friendly listener count.
+const WS_AUDIO_SAMPLE_RATE = 48000;
+const WS_AUDIO_CHANNELS = 2;
+// Safety-net push interval: covers anything that changes without an
+// explicit notifyState() call nearby (vote/member presence timing out,
+// etc.) — everything else (chat, votes, queue edits, track changes) also
+// calls notifyState() directly the instant it happens, well under this.
+const WS_STATE_SAFETY_INTERVAL_MS = 1000;
 const MAX_QUEUE_LENGTH = 200; // sane upper bound so the queue can't be spammed into unbounded memory
 const UPLOADS_DIR = path.join(import.meta.dir, "..", "data", "workfm-uploads");
 // Where tracks get downloaded ahead of time — during the spisetid pause
@@ -286,6 +306,28 @@ interface Subscriber {
   name?: string;
 }
 
+/** Per-connection data stashed on a WorkFM WebSocket (see index.ts's
+ * `websocket` handler, which sets this at upgrade time) — a minimal duck-
+ * typed shape (rather than importing Bun's ServerWebSocket type here) so
+ * this module doesn't need to know about Bun's server internals. */
+export interface WorkFmWsData {
+  slug: string;
+  roomName: string;
+  viewerName?: string;
+  adminName: string;
+  /** Whether this connection currently wants binary PCM audio frames —
+   * toggled by the client sending {type:"listen", on} — see setWsListening(). */
+  listening: boolean;
+}
+
+/** Minimal duck-typed WebSocket shape this module actually needs (Bun's
+ * ServerWebSocket satisfies this) — lets attachWs()/broadcastWsAudio() etc.
+ * stay decoupled from Bun's exact server types. */
+export interface WorkFmWsLike {
+  data: WorkFmWsData;
+  send(data: string | Uint8Array): void;
+}
+
 function encodeIcyMeta(nowPlaying: string): Uint8Array {
   const text = `StreamTitle='${nowPlaying.replace(/'/g, "")}';`;
   const blockBytes = Math.ceil(text.length / 16) * 16;
@@ -471,10 +513,21 @@ class WorkFmQueueStream {
   // playing for a long time doesn't kick off duplicate downloads of the
   // same upcoming item.
   private lookaheadInFlight = new Set<number>();
+  // --- Real-time WebSocket state — see the "Real-time WebSocket channel"
+  // comment near the top of this file. ---
+  private wsClients = new Set<WorkFmWsLike>();
+  // The repackager's stdin, held open across track boundaries (it's fed
+  // straight from broadcast() below, the same call every audio-producing
+  // codepath already funnels through) — null whenever nobody's opted into
+  // WS audio, so broadcast() has nothing extra to do most of the time.
+  private repackagerInput: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private repackagerProc: ReturnType<typeof Bun.spawn> | null = null;
+  private wsStateInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.loadChatState();
     this.spiseTidTimer = setInterval(() => this.enforceSpiseTidSchedule(), SPISETID_CHECK_INTERVAL_MS);
+    this.wsStateInterval = setInterval(() => this.broadcastState(), WS_STATE_SAFETY_INTERVAL_MS);
   }
 
   /** Loads persisted chat history (see CHAT_STATE_PATH) at startup, so a
@@ -623,6 +676,9 @@ class WorkFmQueueStream {
     for (const sub of this.subscribers) {
       if (sub.name) names.add(sub.name);
     }
+    for (const ws of this.wsClients) {
+      if (ws.data.listening && ws.data.viewerName) names.add(ws.data.viewerName);
+    }
     return [...names].sort((a, b) => a.localeCompare(b));
   }
 
@@ -634,6 +690,9 @@ class WorkFmQueueStream {
     let count = 0;
     for (const sub of this.subscribers) {
       if (!sub.name) count++;
+    }
+    for (const ws of this.wsClients) {
+      if (ws.data.listening && !ws.data.viewerName) count++;
     }
     return count;
   }
@@ -785,6 +844,7 @@ class WorkFmQueueStream {
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
     this.saveChatState();
+    this.notifyState();
     return message;
   }
 
@@ -805,7 +865,10 @@ class WorkFmQueueStream {
         changed = true;
       }
     }
-    if (changed) this.saveChatState();
+    if (changed) {
+      this.saveChatState();
+      this.notifyState();
+    }
   }
 
   /** Drops an automatic "now playing: X" marker into the chat log — see
@@ -832,6 +895,7 @@ class WorkFmQueueStream {
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
     this.saveChatState();
+    this.notifyState();
   }
 
   /** Drops an automatic "X has joined..." marker into the chat log — see
@@ -874,6 +938,133 @@ class WorkFmQueueStream {
    * from the request's identity cookie in index.ts so the listeners list
    * only reflects people actually tuned into the audio stream, not just
    * anyone with the /workfm page open. */
+  /** Registers a just-opened WorkFM WebSocket (see index.ts's `open`
+   * handler) and immediately sends it a first state snapshot, so the page
+   * has something to render before the first real change ever happens. */
+  attachWs(ws: WorkFmWsLike) {
+    this.wsClients.add(ws);
+    this.sendStateTo(ws);
+  }
+
+  /** Unregisters a closed/errored WorkFM WebSocket — see index.ts's
+   * `close` handler. Tears the shared PCM repackager down if that was the
+   * last connection still wanting audio. */
+  detachWs(ws: WorkFmWsLike) {
+    this.wsClients.delete(ws);
+    if (ws.data.listening) this.maybeTeardownRepackager();
+  }
+
+  /** Toggles whether `ws` wants binary PCM audio frames — see index.ts's
+   * `message` handler for {type:"listen"}. Spins the shared repackager up
+   * on the first listener, tears it down once the last one leaves. */
+  setWsListening(ws: WorkFmWsLike, on: boolean) {
+    if (ws.data.listening === on) return;
+    ws.data.listening = on;
+    if (on) this.ensureRepackager();
+    else this.maybeTeardownRepackager();
+  }
+
+  private sendStateTo(ws: WorkFmWsLike) {
+    try {
+      ws.send(JSON.stringify({ type: "state", state: { ...this.list(ws.data.viewerName, ws.data.adminName), roomName: ws.data.roomName } }));
+    } catch {
+      // Send failed (already closed) — the socket's own close handler
+      // will detachWs() it; nothing more to do here.
+    }
+  }
+
+  /** Pushes a fresh state snapshot to every connected WS client right now
+   * — called both by the safety-net interval and directly from every
+   * user-visible mutation (chat, votes, queue edits, track changes) below,
+   * so those feel instant rather than waiting out the interval. */
+  private broadcastState() {
+    if (this.wsClients.size === 0) return;
+    for (const ws of this.wsClients) this.sendStateTo(ws);
+  }
+
+  /** Thin alias for broadcastState(), called from every mutation below —
+   * kept as its own name so call sites read as "notify everyone something
+   * changed" rather than the implementation detail of how. */
+  private notifyState() {
+    this.broadcastState();
+  }
+
+  private countWsListeners(): number {
+    let n = 0;
+    for (const ws of this.wsClients) if (ws.data.listening) n++;
+    return n;
+  }
+
+  /** Spins up the shared PCM repackager the first time any WS client asks
+   * for audio — a single long-lived ffmpeg process (regardless of how many
+   * WS listeners there are) that decodes the exact same broadcast() bytes
+   * every legacy HTTP/ICY subscriber gets and re-emits them as raw s16le
+   * PCM, fanned out to every currently-listening WS client. Safe to call
+   * repeatedly; no-ops if already running. */
+  private ensureRepackager() {
+    if (this.repackagerProc) return;
+    const self = this;
+    let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const input = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+    });
+    const proc = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "mp3", "-i", "pipe:0", "-f", "s16le", "-ar", String(WS_AUDIO_SAMPLE_RATE), "-ac", String(WS_AUDIO_CHANNELS), "pipe:1"],
+      { stdin: input, stdout: "pipe", stderr: "ignore" }
+    );
+    this.repackagerProc = proc;
+    this.repackagerInput = controller;
+    (async () => {
+      try {
+        const reader = proc.stdout.getReader();
+        while (self.repackagerProc === proc) {
+          const { done, value } = await reader.read();
+          if (done || !value) break;
+          for (const ws of self.wsClients) {
+            if (!ws.data.listening) continue;
+            try {
+              ws.send(value);
+            } catch {
+              // Best-effort — a dead socket here is cleaned up by its own close handler.
+            }
+          }
+        }
+      } catch {
+        // Repackager died mid-stream (e.g. killed on teardown) — nothing more to read.
+      } finally {
+        if (self.repackagerProc === proc) {
+          self.repackagerProc = null;
+          self.repackagerInput = null;
+          // Still wanted by someone (an unexpected crash rather than a
+          // deliberate teardown) — restart rather than leaving them silent.
+          if (self.countWsListeners() > 0) self.ensureRepackager();
+        }
+      }
+    })();
+  }
+
+  /** Kills the shared repackager once nobody's listening over WS anymore —
+   * mirrors the main pipeline's own idle-teardown philosophy (see
+   * sleepUntilNotIdle()) rather than transcoding to nobody forever. */
+  private maybeTeardownRepackager() {
+    if (this.countWsListeners() > 0) return;
+    if (!this.repackagerProc) return;
+    try {
+      this.repackagerInput?.close();
+    } catch {
+      // already closed
+    }
+    try {
+      this.repackagerProc.kill();
+    } catch {
+      // already exited
+    }
+    this.repackagerProc = null;
+    this.repackagerInput = null;
+  }
+
   subscribe(wantsMeta: boolean, name?: string): ReadableStream<Uint8Array> {
     const self = this;
     let sub: Subscriber;
@@ -928,6 +1119,7 @@ class WorkFmQueueStream {
     };
     this.queue.push(item);
     this.start();
+    this.notifyState();
     return item;
   }
 
@@ -999,6 +1191,7 @@ class WorkFmQueueStream {
       }
     }
 
+    this.notifyState();
     return item;
   }
 
@@ -1029,6 +1222,7 @@ class WorkFmQueueStream {
       };
       this.queue.push(item);
       this.start();
+      this.notifyState();
       return item;
     }
 
@@ -1048,6 +1242,7 @@ class WorkFmQueueStream {
     };
     this.queue.push(item);
     this.start();
+    this.notifyState();
     return item;
   }
 
@@ -1074,6 +1269,7 @@ class WorkFmQueueStream {
     if (removed?.source === "upload") this.cleanupUpload(removed.id).catch(() => {});
     if (removed) this.cleanupPrefetch(removed.id);
     this.nextVotes.delete(id);
+    this.notifyState();
     return { ok: true };
   }
 
@@ -1121,8 +1317,10 @@ class WorkFmQueueStream {
       this.nextVotes.delete(itemId);
       const [moved] = this.queue.splice(idx, 1);
       if (moved) this.queue.unshift(moved);
+      this.notifyState();
       return { ok: true, moved: true };
     }
+    this.notifyState();
     return { ok: true, moved: false, votes, total, hasVoted: voters.has(name) };
   }
 
@@ -1159,8 +1357,10 @@ class WorkFmQueueStream {
     if (votes * 2 >= total) {
       this.skipVotes.clear();
       this.killPlayback();
+      this.notifyState();
       return { ok: true, skipped: true };
     }
+    this.notifyState();
     return { ok: true, skipped: false, votes, total, hasVoted: this.skipVotes.has(name) };
   }
 
@@ -1195,6 +1395,7 @@ class WorkFmQueueStream {
     const total = Math.max(this.activeMemberNames().length, 1);
     const votes = this.repeatVotes.size;
     this.repeatArmed = votes * 2 >= total;
+    this.notifyState();
     return { ok: true, armed: this.repeatArmed, votes, total, hasVoted: this.repeatVotes.has(name) };
   }
 
@@ -1505,6 +1706,7 @@ class WorkFmQueueStream {
     this.current = null;
     this.currentStartedAt = null;
     this.currentMetaString = "Radio Bækgaard - auto-DJ resting (no listeners)";
+    this.notifyState();
     this.pausePlayClock();
     while (this.currentGen === gen && this.queue.length === 0 && this.emptySince !== null && !this.spiseTidPhase) {
       await Bun.sleep(IDLE_POLL_INTERVAL_MS);
@@ -1553,6 +1755,7 @@ class WorkFmQueueStream {
           this.current = null;
           this.currentStartedAt = null;
           this.currentMetaString = "Radio Bækgaard - waiting for requests";
+          this.notifyState();
           const gen = ++this.currentGen;
           try {
             await this.playSilence(gen);
@@ -1589,6 +1792,7 @@ class WorkFmQueueStream {
         addedBy: item.addedBy,
       });
       this.pushSongChangeChatMarker(item);
+      this.notifyState();
       const gen = ++this.currentGen;
 
       // Whatever's genuinely up next (a real request, or — if the request
@@ -1666,6 +1870,7 @@ class WorkFmQueueStream {
     this.current = alarmItem;
     this.currentMetaString = "ANNOUNCEMENT";
     this.currentStartedAt = Date.now();
+    this.notifyState();
     const gen = ++this.currentGen;
 
     if (phase === "pause") {
@@ -1867,6 +2072,7 @@ class WorkFmQueueStream {
       this.current = item;
       this.currentMetaString = label;
       this.currentStartedAt = Date.now();
+      this.notifyState();
       const gen = ++this.currentGen;
       try {
         await this.playUpload(item, gen);
@@ -2102,6 +2308,7 @@ class WorkFmQueueStream {
       addedBy: upcoming.addedBy,
     });
     this.pushSongChangeChatMarker(upcoming);
+    this.notifyState();
     // Consumed either way from here on — it's already "now playing".
     this.prefetchedFiles.delete(upcoming.id);
 
@@ -2272,6 +2479,14 @@ class WorkFmQueueStream {
       const dropped = this.backlogChunks.shift()!;
       this.backlogBytes -= dropped.length;
     }
+    if (this.repackagerInput) {
+      try {
+        this.repackagerInput.enqueue(chunk);
+      } catch {
+        // Repackager's stdin already closed/errored — ensureRepackager()'s
+        // own restart-on-crash logic handles recovering from this.
+      }
+    }
     for (const sub of this.subscribers) {
       try {
         if (!sub.wantsMeta) {
@@ -2308,6 +2523,7 @@ class WorkFmQueueStream {
   /** Kills any in-flight yt-dlp/ffmpeg pair — called on process shutdown. */
   stop() {
     if (this.spiseTidTimer) clearInterval(this.spiseTidTimer);
+    if (this.wsStateInterval) clearInterval(this.wsStateInterval);
     try {
       this.ytdlpProc?.kill();
     } catch {
@@ -2315,6 +2531,11 @@ class WorkFmQueueStream {
     }
     try {
       this.ffmpegProc?.kill();
+    } catch {
+      // ignore
+    }
+    try {
+      this.repackagerProc?.kill();
     } catch {
       // ignore
     }

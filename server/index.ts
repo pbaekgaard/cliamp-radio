@@ -13,7 +13,7 @@ import {
 import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, normalizeWorkFmName } from "./lib/workfmIdentity";
 import { getColorForName, PRESET_COLORS, renameColorOverride, setColorForName } from "./lib/workfmColors";
 import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
-import { ICY_METAINT as WORKFM_ICY_METAINT } from "./lib/workfmQueue";
+import { ICY_METAINT as WORKFM_ICY_METAINT, type WorkFmWsData } from "./lib/workfmQueue";
 import { drainText, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
 import { extractSpotifyTrackId, resolveSpotifyTrack } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
@@ -90,9 +90,34 @@ async function resolveWorkFmIdentity(req: Request): Promise<{ name: string; id: 
   return identity ? { ...identity, isAdmin: false } : null;
 }
 
-const server = Bun.serve({
+const server = Bun.serve<WorkFmWsData>({
   port: PORT,
   hostname: "0.0.0.0",
+  // Backs WorkFM's real-time channel (see the /api/workfm/rooms/:slug/live
+  // upgrade route below and lib/workfmQueue.ts's attachWs()/setWsListening()/
+  // detachWs()) — one persistent connection per open /workfm or kiosk page
+  // that pushes state instantly instead of being polled, plus opt-in raw
+  // PCM audio frames for sub-second "Listen in" latency.
+  websocket: {
+    open(ws) {
+      const room = getWorkFmRoom(ws.data.slug);
+      room?.stream.attachWs(ws);
+    },
+    message(ws, message) {
+      const room = getWorkFmRoom(ws.data.slug);
+      if (!room || typeof message !== "string") return;
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed && parsed.type === "listen") room.stream.setWsListening(ws, !!parsed.on);
+      } catch {
+        // Ignore malformed control messages.
+      }
+    },
+    close(ws) {
+      const room = getWorkFmRoom(ws.data.slug);
+      room?.stream.detachWs(ws);
+    },
+  },
   async fetch(req, srv) {
     const url = new URL(req.url);
     const { pathname } = url;
@@ -783,6 +808,30 @@ const server = Bun.serve({
 
     if (pathname === "/api/version" && req.method === "GET") {
       return json({ version: getCurrentVersion() });
+    }
+
+    // --- WorkFM real-time channel (state push + low-latency PCM audio) ---
+    // Upgrades to a WebSocket instead of returning a Response — see the
+    // `websocket` handlers below and workfmQueue.ts's attachWs()/
+    // setWsListening()/broadcast(). Coexists with (doesn't replace) the
+    // plain HTTP MP3/ICY stream above, which any other existing consumer
+    // of that raw URL keeps using exactly as before.
+    const workfmLiveMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/live$/);
+    if (workfmLiveMatch) {
+      const slug = decodeURIComponent(workfmLiveMatch[1]!);
+      const room = getWorkFmRoom(slug);
+      if (!room) return new Response("Room not found", { status: 404 });
+      const identity = await resolveWorkFmIdentity(req);
+      const adminIdentity = await getAdminWorkFmIdentity();
+      const data: WorkFmWsData = {
+        slug,
+        roomName: room.name,
+        viewerName: identity?.name,
+        adminName: adminIdentity.name,
+        listening: false,
+      };
+      if (srv.upgrade(req, { data })) return;
+      return new Response("WebSocket upgrade failed", { status: 400 });
     }
 
     // --- Static client (SPA) ---
