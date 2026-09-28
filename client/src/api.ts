@@ -128,10 +128,11 @@ export interface WorkFmChatMessage {
    * server/lib/workfmColors.ts. */
   color: string;
   /** Set for an automatic marker rather than a real chat message — "song"
-   * for a track-change divider, "rename" for a display-name-change one.
-   * Render as a dimmed divider, not a chat bubble. Legacy `true` (from
-   * before "song"/"rename" existed) means "song". */
-  system?: boolean | "song" | "rename";
+   * for a track-change divider, "rename" for a display-name-change one,
+   * "join"/"leave" for someone entering/leaving the room. Render as a
+   * dimmed divider, not a chat bubble. Legacy `true` (from before
+   * "song"/"rename" existed) means "song". */
+  system?: boolean | "song" | "rename" | "join" | "leave";
   /** Whether the sender was the site admin — see server/lib/auth.ts's
    * getAdminWorkFmIdentity(). Render a crown next to their name. */
   isAdmin?: boolean;

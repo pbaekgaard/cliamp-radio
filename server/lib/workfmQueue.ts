@@ -100,6 +100,24 @@ const CHAT_STATE_PATH = path.join(import.meta.dir, "..", "data", "workfm-chat-st
 // considered gone — comfortably longer than the client's ~1.5s poll
 // interval so a slow network blip doesn't make someone flicker in and out.
 const PRESENCE_TIMEOUT_MS = 10 * 1000;
+// Variations for the automatic join/leave chat markers (see
+// pushJoinChatMarker()/pushLeaveChatMarker()) — "{name}" is swapped for the
+// person's display name. One is picked at random each time so the chat log
+// doesn't repeat the exact same line for every arrival/departure.
+const JOIN_PHRASES = [
+  "{name} has joined the jamming session",
+  "{name} tuned in",
+  "{name} joined the party",
+  "{name} showed up to the session",
+  "{name} is now in the room",
+];
+const LEAVE_PHRASES = [
+  "{name} left the greatest radio station ever",
+  "{name} tuned out",
+  "{name} left the jamming session",
+  "{name} stepped out of the room",
+  "{name} has left the building",
+];
 // How long the room can go with nobody around at all (see emptySince
 // getter) before the auto-DJ stops picking new tracks and the loop goes to
 // sleep — no yt-dlp/ffmpeg processes running — to save CPU on the host.
@@ -235,14 +253,16 @@ interface ChatMessage {
    * color change doesn't repaint history. */
   color: string;
   /** Set (instead of a real sender) for an automatic marker dropped into
-   * the chat log — either "song" (a real track just started, see
-   * pushSongChangeChatMarker) or "rename" (someone changed their display
-   * name, see pushRenameChatMarker). Not a real message — clients should
-   * render it as a dimmed, differently-styled divider rather than a chat
-   * bubble. Older persisted messages may still have the legacy `true`
-   * value from before "song"/"rename" were distinguished — treat that as
-   * "song" for backwards compatibility. */
-  system?: boolean | "song" | "rename";
+   * the chat log — "song" (a real track just started, see
+   * pushSongChangeChatMarker), "rename" (someone changed their display
+   * name, see pushRenameChatMarker), "join" (someone entered the room, see
+   * pushJoinChatMarker) or "leave" (their presence expired, see
+   * pushLeaveChatMarker). Not a real message — clients should render it as
+   * a dimmed, differently-styled divider rather than a chat bubble. Older
+   * persisted messages may still have the legacy `true` value from before
+   * "song"/"rename" were distinguished — treat that as "song" for
+   * backwards compatibility. */
+  system?: boolean | "song" | "rename" | "join" | "leave";
   /** The sender's stable per-session identity id (see
    * workfmIdentity.ts) — *not* their display name, which anyone can
    * change or collide with someone else's. Used solely to find "my past
@@ -563,22 +583,33 @@ class WorkFmQueueStream {
   }
 
   /** Records that `name` just polled the room (i.e. has the page open),
-   * refreshing how long they count as "in the room" — see PRESENCE_TIMEOUT_MS. */
+   * refreshing how long they count as "in the room" — see PRESENCE_TIMEOUT_MS.
+   * Drops a "joined" chat marker (see pushJoinChatMarker) the first time
+   * `name` shows up, or again after their previous presence has already
+   * expired (i.e. they'd left and came back) — never on every routine poll. */
   private touchPresence(name?: string) {
     if (!name) return;
+    const lastSeen = this.presence.get(name);
+    const wasActive = lastSeen !== undefined && Date.now() - lastSeen <= PRESENCE_TIMEOUT_MS;
     this.presence.set(name, Date.now());
+    if (!wasActive) this.pushJoinChatMarker(name);
   }
 
   /** Distinct names who've polled within PRESENCE_TIMEOUT_MS, sorted —
-   * expired entries are garbage-collected as a side effect. This is "who's
-   * actually in the room right now", independent of whether they're
-   * streaming the audio. */
+   * expired entries are garbage-collected as a side effect, dropping a
+   * "left" chat marker (see pushLeaveChatMarker) for each one right as
+   * it's removed. This is "who's actually in the room right now",
+   * independent of whether they're streaming the audio. */
   private activeMemberNames(): string[] {
     const now = Date.now();
     const names: string[] = [];
     for (const [name, lastSeen] of this.presence) {
-      if (now - lastSeen > PRESENCE_TIMEOUT_MS) this.presence.delete(name);
-      else names.push(name);
+      if (now - lastSeen > PRESENCE_TIMEOUT_MS) {
+        this.presence.delete(name);
+        this.pushLeaveChatMarker(name);
+      } else {
+        names.push(name);
+      }
     }
     return names.sort((a, b) => a.localeCompare(b));
   }
@@ -798,6 +829,34 @@ class WorkFmQueueStream {
     this.pruneExpiredChat();
     const text = `${oldName} changed name to ${newName}`;
     const message: ChatMessage = { id: this.nextChatId++, name: "", text, at: Date.now(), color: "", system: "rename" };
+    this.chat.push(message);
+    if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    this.saveChatState();
+  }
+
+  /** Drops an automatic "X has joined..." marker into the chat log — see
+   * ChatMessage.system. Called from touchPresence() the moment someone's
+   * presence goes from absent/expired to active, i.e. they just showed up
+   * in the room (not on every routine poll while they're already here). */
+  private pushJoinChatMarker(name: string) {
+    this.pruneExpiredChat();
+    const phrase = JOIN_PHRASES[Math.floor(Math.random() * JOIN_PHRASES.length)]!;
+    const text = phrase.replace("{name}", name);
+    const message: ChatMessage = { id: this.nextChatId++, name: "", text, at: Date.now(), color: "", system: "join" };
+    this.chat.push(message);
+    if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
+    this.saveChatState();
+  }
+
+  /** Drops an automatic "X left..." marker into the chat log — see
+   * ChatMessage.system. Called from activeMemberNames() right as a stale
+   * presence entry (no poll within PRESENCE_TIMEOUT_MS) is garbage-
+   * collected, i.e. they've gone quiet long enough to count as gone. */
+  private pushLeaveChatMarker(name: string) {
+    this.pruneExpiredChat();
+    const phrase = LEAVE_PHRASES[Math.floor(Math.random() * LEAVE_PHRASES.length)]!;
+    const text = phrase.replace("{name}", name);
+    const message: ChatMessage = { id: this.nextChatId++, name: "", text, at: Date.now(), color: "", system: "leave" };
     this.chat.push(message);
     if (this.chat.length > MAX_CHAT_MESSAGES) this.chat.shift();
     this.saveChatState();
