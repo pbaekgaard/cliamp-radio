@@ -116,13 +116,15 @@ async function save() {
  * (ffmpeg erroring on a missing file) and skip straight to the next one —
  * call this instead of checking `!!entry.savedFilePath` directly anywhere
  * a track's actual playability matters. */
+/** Whether `entry`'s saved local copy is actually still on disk right now.
+ * This is deliberately a *read-only* check — it does NOT clear/forget
+ * `savedFilePath` when the file happens to be missing, since a transient
+ * issue (unmounted disk, in-progress move, etc.) should never permanently
+ * erase library metadata. Callers that need "is this currently playable"
+ * should call this; nothing here mutates the entry or deletes history. */
 export function isSavedFileStillOnDisk(entry: LibraryTrack): boolean {
   if (!entry.savedFilePath) return false;
-  if (existsSync(entry.savedFilePath)) return true;
-  entry.savedFilePath = undefined;
-  entry.savedFileBytes = undefined;
-  save();
-  return false;
+  return existsSync(entry.savedFilePath);
 }
 
 function summarize(entry: LibraryTrack, viewerName?: string): LibraryTrackSummary {
@@ -195,6 +197,11 @@ export function recordPlay(item: PlayedTrack) {
     existing.playCount += 1;
     existing.title = item.title;
     existing.artist = item.artist;
+    // registerUpload() creates a placeholder entry with firstPlayedAt: 0
+    // before the track has actually played (playCount 0) — the first real
+    // play needs to backfill it, or "uploaded, saved for later" tracks would
+    // keep firstPlayedAt: 0 forever.
+    if (existing.firstPlayedAt === 0) existing.firstPlayedAt = now;
   } else {
     library.set(item.libraryId, {
       id: item.libraryId,
@@ -346,34 +353,53 @@ export function listPlayableHistoryIds(): string[] {
     .map((e) => e.id);
 }
 
-export function listHistory(viewerName?: string, limit = 50): LibraryTrackSummary[] {
+/** Matches `e` against a search query (case-insensitive substring on title
+ * and artist). An empty/undefined query always matches. */
+function matchesQuery(e: LibraryTrack, q?: string): boolean {
+  if (!q) return true;
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return e.title.toLowerCase().includes(needle) || (e.artist ?? "").toLowerCase().includes(needle);
+}
+
+// When the caller is searching (q set), don't silently hide matches beyond
+// the normal "recent/top N" page size — a search is expected to scan the
+// *entire* library, not just whatever happens to be in the default list.
+// This is capped (not truly unlimited) purely as a sanity ceiling.
+const SEARCH_LIMIT = 2000;
+
+export function listHistory(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.playCount > 0) // exclude upload placeholders that haven't actually played yet (see registerUpload)
+    .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, limit)
+    .slice(0, q ? SEARCH_LIMIT : limit)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listMostLiked(viewerName?: string, limit = 50): LibraryTrackSummary[] {
+export function listMostLiked(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.likes.length > 0 && (e.source === "youtube" || isSavedFileStillOnDisk(e)))
+    .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.likes.length - a.likes.length || b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, limit)
+    .slice(0, q ? SEARCH_LIMIT : limit)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listMostPlayed(viewerName?: string, limit = 50): LibraryTrackSummary[] {
+export function listMostPlayed(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.playCount > 0)
+    .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.playCount - a.playCount || b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, limit)
+    .slice(0, q ? SEARCH_LIMIT : limit)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listSavedUploads(viewerName?: string, limit = 50): LibraryTrackSummary[] {
+export function listSavedUploads(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
   return [...library.values()]
     .filter((e) => e.source === "upload" && isSavedFileStillOnDisk(e))
+    .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, limit)
+    .slice(0, q ? SEARCH_LIMIT : limit)
     .map((e) => summarize(e, viewerName));
 }

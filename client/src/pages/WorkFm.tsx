@@ -788,32 +788,35 @@ function HistorySearchModal({
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // Server-side search (see workfmLibrary.ts) so this actually scans the
+  // whole history, not just the 50 most recently played tracks.
+  const load = useCallback(async (q: string) => {
     try {
-      setTracks(await api.workfmLibrary("history"));
+      setTracks(await api.workfmLibrary("history", q || undefined));
     } catch {
       // ignore transient errors
     }
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const timer = setTimeout(() => load(query), 200);
+    return () => clearTimeout(timer);
+  }, [query, load]);
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? tracks.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.artist.toLowerCase().includes(q),
-      )
-    : tracks;
+  // Keep results reasonably live while the modal is open (newly-played
+  // tracks otherwise wouldn't show up until it was reopened).
+  useEffect(() => {
+    const interval = setInterval(() => load(query), 5000);
+    return () => clearInterval(interval);
+  }, [query, load]);
+
+  const filtered = tracks;
 
   async function like(id: string) {
     if (!name) return;
     try {
       await api.workfmToggleLike(id);
-      load();
+      load(query);
     } catch {
       // ignore
     }
@@ -1919,17 +1922,32 @@ function LibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  const load = useCallback(async () => {
+  // The search itself now runs server-side (see workfmLibrary.ts's
+  // matchesQuery) so it covers the *entire* library, not just whatever
+  // page of "most recent"/"most liked" happened to already be fetched.
+  const load = useCallback(async (q: string) => {
     try {
-      setTracks(await api.workfmLibrary(view));
+      setTracks(await api.workfmLibrary(view, q || undefined));
     } catch {
       // ignore transient errors
     }
   }, [view]);
 
+  // Debounce so every keystroke doesn't fire a request.
   useEffect(() => {
-    if (open) load();
-  }, [open, load]);
+    if (!open) return;
+    const timer = setTimeout(() => load(query), 200);
+    return () => clearTimeout(timer);
+  }, [open, query, load]);
+
+  // Newly-played/uploaded/liked tracks otherwise wouldn't show up here
+  // until the user manually reopened the panel or changed tabs — poll
+  // gently while the panel is open so it stays reasonably live.
+  useEffect(() => {
+    if (!open) return;
+    const interval = setInterval(() => load(query), 5000);
+    return () => clearInterval(interval);
+  }, [open, query, load]);
 
   // Reset any in-progress search when switching tabs, so a "saved uploads"
   // query doesn't silently keep filtering out history results (or vice versa).
@@ -1937,20 +1955,13 @@ function LibraryPanel({
     setQuery("");
   }, [view]);
 
-  const q = query.trim().toLowerCase();
-  const filteredTracks = q
-    ? tracks.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.artist.toLowerCase().includes(q),
-      )
-    : tracks;
+  const filteredTracks = tracks;
 
   async function like(id: string) {
     if (!name) return;
     try {
       await api.workfmToggleLike(id);
-      load();
+      load(query);
     } catch {
       // ignore
     }

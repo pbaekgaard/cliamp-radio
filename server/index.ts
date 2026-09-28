@@ -512,9 +512,10 @@ const server = Bun.serve<WorkFmWsData>({
     if (pathname === "/api/workfm/library" && req.method === "GET") {
       const identity = await resolveWorkFmIdentity(req);
       const view = url.searchParams.get("view") ?? "history";
-      if (view === "most-liked") return json(listMostLiked(identity?.name));
-      if (view === "saved") return json(listSavedUploads(identity?.name));
-      return json(listHistory(identity?.name));
+      const q = url.searchParams.get("q") ?? undefined;
+      if (view === "most-liked") return json(listMostLiked(identity?.name, undefined, q));
+      if (view === "saved") return json(listSavedUploads(identity?.name, undefined, q));
+      return json(listHistory(identity?.name, undefined, q));
     }
 
     const workfmLikeMatch = pathname.match(/^\/api\/workfm\/library\/([^/]+)\/like$/);

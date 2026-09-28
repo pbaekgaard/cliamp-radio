@@ -2283,6 +2283,19 @@ class WorkFmQueueStream {
     }
 
     if (this.currentGen !== gen || !canCrossfade) return null;
+    // `upcoming` is only a snapshot taken back when this track started
+    // playing (see loop()'s doc comment on scheduleLookahead()) — a
+    // genuine listener request can have been added (or the queue
+    // reordered/skipped) at any point during however long this track ran
+    // for. Crossfading straight into a since-stale auto-DJ pick — or a
+    // real request that's no longer actually next — would let the auto-DJ
+    // (or an outdated queue order) preempt a real request that's since
+    // taken its place. Re-derive what's genuinely next right now and bail
+    // out of the crossfade (falling back to the usual silence-bridged
+    // transition, which re-reads the live queue) unless it's still exactly
+    // what we prefetched.
+    const stillNext = this.queue.length > 0 ? this.queue[0] : this.pendingAutoDjPick;
+    if (stillNext?.id !== upcoming!.id) return null;
     return this.crossfadeInto(filePath, durationSec!, upcomingFilePath!, upcoming!, gen);
   }
 
