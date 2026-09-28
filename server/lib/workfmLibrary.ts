@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -106,6 +106,25 @@ async function save() {
   });
 }
 
+/** Whether a library entry's `savedFilePath` still actually points at a
+ * real file — and self-heals the metadata (clearing the stale
+ * savedFilePath/savedFileBytes) if it doesn't, e.g. because it was deleted
+ * out from under us, a disk cleanup, or a crash mid-write. Without this,
+ * every "is this playable" check below (`available`, the auto-DJ's history
+ * pool, getCachedYoutubeFile()) would keep believing a since-vanished file
+ * is still there, which surfaces as tracks that instantly fail to play
+ * (ffmpeg erroring on a missing file) and skip straight to the next one —
+ * call this instead of checking `!!entry.savedFilePath` directly anywhere
+ * a track's actual playability matters. */
+export function isSavedFileStillOnDisk(entry: LibraryTrack): boolean {
+  if (!entry.savedFilePath) return false;
+  if (existsSync(entry.savedFilePath)) return true;
+  entry.savedFilePath = undefined;
+  entry.savedFileBytes = undefined;
+  save();
+  return false;
+}
+
 function summarize(entry: LibraryTrack, viewerName?: string): LibraryTrackSummary {
   return {
     id: entry.id,
@@ -118,7 +137,7 @@ function summarize(entry: LibraryTrack, viewerName?: string): LibraryTrackSummar
     playCount: entry.playCount,
     likes: entry.likes.length,
     likedByMe: !!viewerName && entry.likes.includes(viewerName.toLowerCase()),
-    available: entry.source === "youtube" || !!entry.savedFilePath,
+    available: entry.source === "youtube" || isSavedFileStillOnDisk(entry),
   };
 }
 
@@ -271,12 +290,13 @@ async function enforceYoutubeCacheLimit(): Promise<void> {
 }
 
 /** The cached local file for a YouTube library entry, if one's been
- * downloaded before — null if it's never been cached (first play ever, the
- * cache write failed/hasn't finished yet, or it's since been evicted to
- * stay under YOUTUBE_CACHE_LIMIT_BYTES) or the entry doesn't exist. */
+ * downloaded before and is still actually there — null if it's never been
+ * cached (first play ever, the cache write failed/hasn't finished yet, it's
+ * since been evicted to stay under YOUTUBE_CACHE_LIMIT_BYTES, or the file's
+ * vanished from disk some other way), or the entry doesn't exist. */
 export function getCachedYoutubeFile(libraryId: string): string | null {
   const entry = library.get(libraryId);
-  return entry?.source === "youtube" ? entry.savedFilePath ?? null : null;
+  return entry?.source === "youtube" && isSavedFileStillOnDisk(entry) ? entry.savedFilePath! : null;
 }
 
 /** Toggles `name`'s like on a track; returns the updated public state, or
@@ -322,7 +342,7 @@ export async function deleteLibraryEntry(id: string): Promise<boolean> {
  * the caller is responsible for shuffling. */
 export function listPlayableHistoryIds(): string[] {
   return [...library.values()]
-    .filter((e) => e.playCount > 0 && (e.source === "youtube" || !!e.savedFilePath))
+    .filter((e) => e.playCount > 0 && (e.source === "youtube" || isSavedFileStillOnDisk(e)))
     .map((e) => e.id);
 }
 
@@ -336,7 +356,7 @@ export function listHistory(viewerName?: string, limit = 50): LibraryTrackSummar
 
 export function listMostLiked(viewerName?: string, limit = 50): LibraryTrackSummary[] {
   return [...library.values()]
-    .filter((e) => e.likes.length > 0 && (e.source === "youtube" || !!e.savedFilePath))
+    .filter((e) => e.likes.length > 0 && (e.source === "youtube" || isSavedFileStillOnDisk(e)))
     .sort((a, b) => b.likes.length - a.likes.length || b.lastPlayedAt - a.lastPlayedAt)
     .slice(0, limit)
     .map((e) => summarize(e, viewerName));
@@ -352,7 +372,7 @@ export function listMostPlayed(viewerName?: string, limit = 50): LibraryTrackSum
 
 export function listSavedUploads(viewerName?: string, limit = 50): LibraryTrackSummary[] {
   return [...library.values()]
-    .filter((e) => e.source === "upload" && !!e.savedFilePath)
+    .filter((e) => e.source === "upload" && isSavedFileStillOnDisk(e))
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
     .slice(0, limit)
     .map((e) => summarize(e, viewerName));

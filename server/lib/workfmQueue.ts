@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { relayPaced } from "./audioRelay";
-import { attachSavedUpload, attachYoutubeCache, getCachedYoutubeFile, getLibraryTrack, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOADS_DIR, YOUTUBE_CACHE_DIR, type LibraryTrack } from "./workfmLibrary";
+import { attachSavedUpload, attachYoutubeCache, getCachedYoutubeFile, getLibraryTrack, isSavedFileStillOnDisk, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOADS_DIR, YOUTUBE_CACHE_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
 import {
   announcementFilePath,
@@ -442,9 +442,15 @@ class WorkFmQueueStream {
   // request queue is empty — reshuffled from scratch (see
   // listPlayableHistoryIds()) once exhausted. See pickAutoDjEntry() below.
   private autoDjShuffle: string[] = [];
-  // libraryId of the last track the auto-DJ played, so a fresh reshuffle can
-  // avoid immediately repeating it back-to-back.
-  private lastAutoDjLibraryId: string | null = null;
+  // libraryId of the last real (non-special) track played — whether picked
+  // by the auto-DJ or a genuine listener request — so a fresh reshuffle (or
+  // the auto-DJ picking up right after a manual request) can avoid
+  // immediately repeating it back-to-back. Deliberately broader than "last
+  // auto-DJ pick": a manual request finishing right as the request queue
+  // empties out is just as much a same-song-twice risk as two consecutive
+  // auto-DJ picks would be — see pickAutoDjEntry()'s doc comment and every
+  // `this.lastPlayedLibraryId = ...` assignment below.
+  private lastPlayedLibraryId: string | null = null;
   // name -> last time (ms since epoch) they polled GET /queue for this room.
   // This is how "who's in the room" is tracked — separate from who's
   // actually streaming audio (subscribers) — see touchPresence()/members().
@@ -1226,7 +1232,7 @@ class WorkFmQueueStream {
       return item;
     }
 
-    if (!entry.savedFilePath) throw new Error("that track is no longer available");
+    if (!isSavedFileStillOnDisk(entry)) throw new Error("that track is no longer available");
     const item: QueueItem = {
       id: this.nextId++,
       videoId: "",
@@ -1495,9 +1501,12 @@ class WorkFmQueueStream {
    * history, shuffled — or null if there's nothing playable yet (fresh
    * install with no history, or every saved upload has expired since being
    * shuffled in). Refills+reshuffles `autoDjShuffle` from
-   * listPlayableHistoryIds() once it runs out, swapping the last-played
-   * track out of the first slot (if it landed there) so shuffle repeats
-   * don't play the same thing twice in a row.
+   * listPlayableHistoryIds() once it runs out. Whatever's about to be drawn
+   * next is never allowed to be `lastPlayedLibraryId` (whatever — auto-DJ'd
+   * or manually requested — played immediately before this pick), swapping
+   * it further back in the shuffle instead, so a manual request finishing
+   * right as the auto-DJ picks up next can't produce a back-to-back repeat
+   * any more than two consecutive auto-DJ picks could.
    */
   private pickAutoDjEntry(): LibraryTrack | null {
     if (this.autoDjShuffle.length === 0) {
@@ -1507,20 +1516,22 @@ class WorkFmQueueStream {
         const j = Math.floor(Math.random() * (i + 1));
         [ids[i], ids[j]] = [ids[j]!, ids[i]!];
       }
-      if (ids.length > 1 && ids[0] === this.lastAutoDjLibraryId) {
-        [ids[0], ids[1]] = [ids[1]!, ids[0]!];
-      }
       this.autoDjShuffle = ids;
     }
-    // Entries can have gone stale (e.g. a saved upload's TTL expired) since
-    // they were shuffled in — re-fetch and skip any that are no longer
-    // playable rather than surfacing a broken track.
+    // Entries can have gone stale (e.g. a saved upload's TTL expired, or a
+    // youtube cache/upload file went missing on disk since being shuffled
+    // in) since they were shuffled in — re-fetch and skip any that are no
+    // longer playable rather than surfacing a broken track.
     while (this.autoDjShuffle.length > 0) {
+      if (this.autoDjShuffle.length > 1 && this.autoDjShuffle[0] === this.lastPlayedLibraryId) {
+        const j = 1 + Math.floor(Math.random() * (this.autoDjShuffle.length - 1));
+        [this.autoDjShuffle[0], this.autoDjShuffle[j]] = [this.autoDjShuffle[j]!, this.autoDjShuffle[0]!];
+      }
       const id = this.autoDjShuffle.shift()!;
       const entry = getLibraryTrack(id);
-      const playable = entry && (entry.source === "youtube" ? !!entry.videoId && !!entry.url : !!entry.savedFilePath);
+      const playable = entry && (entry.source === "youtube" ? !!entry.videoId && !!entry.url : isSavedFileStillOnDisk(entry));
       if (entry && playable) {
-        this.lastAutoDjLibraryId = id;
+        this.lastPlayedLibraryId = id;
         return entry;
       }
     }
@@ -1542,7 +1553,7 @@ class WorkFmQueueStream {
       if (!entry.videoId || !entry.url) return null;
       return { ...base, videoId: entry.videoId, url: entry.url, artist: entry.artist, title: entry.title, source: "youtube" };
     }
-    if (!entry.savedFilePath) return null;
+    if (!isSavedFileStillOnDisk(entry)) return null;
     return {
       ...base,
       videoId: "",
@@ -1767,6 +1778,11 @@ class WorkFmQueueStream {
       }
       const item = this.queue.shift()!;
       this.current = item;
+      // Tracks the immediately-preceding real track regardless of who
+      // picked it (see pickAutoDjEntry()'s doc comment) — every item
+      // reaching this line is a genuine song (special/announcement segments
+      // are played through their own dedicated methods, never queued here).
+      this.lastPlayedLibraryId = item.libraryId;
       this.currentMetaString = `${item.artist} - ${item.title}`;
       this.skipVotes.clear();
       this.repeatVotes.clear();
@@ -2290,6 +2306,7 @@ class WorkFmQueueStream {
     gen: number
   ): Promise<{ item: QueueItem; playedFully: boolean } | null> {
     this.current = upcoming;
+    this.lastPlayedLibraryId = upcoming.libraryId; // see pickAutoDjEntry()'s doc comment
     this.currentMetaString = `${upcoming.artist} - ${upcoming.title}`;
     // It's effectively CROSSFADE_SEC seconds in already once the blend
     // starts, so the elapsed/total indicator doesn't jump backwards.
