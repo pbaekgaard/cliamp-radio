@@ -362,44 +362,87 @@ function matchesQuery(e: LibraryTrack, q?: string): boolean {
   return e.title.toLowerCase().includes(needle) || (e.artist ?? "").toLowerCase().includes(needle);
 }
 
-// When the caller is searching (q set), don't silently hide matches beyond
-// the normal "recent/top N" page size — a search is expected to scan the
-// *entire* library, not just whatever happens to be in the default list.
-// This is capped (not truly unlimited) purely as a sanity ceiling.
-const SEARCH_LIMIT = 2000;
+// These views used to always return their *entire* matching set in one
+// shot (a flat `limit`/no-offset slice from the front), which — now that
+// "default browse" and "search" both scan the whole library rather than
+// just the 50 most-recent — could mean shipping thousands of entries to
+// the client on first load. The UI (see WorkFm.tsx's LibraryPanel and
+// HistorySearchModal) now paginates instead: fetch PAGE_SIZE at a time via
+// `offset`, loading more only once the user actually scrolls near the
+// bottom of the list. `limit` is still caller-settable (e.g. the
+// leaderboards ask for a flat top-5, admin's history export asks for up to
+// MAX_LIMIT) and is clamped to MAX_LIMIT as a sanity ceiling either way.
+const PAGE_SIZE = 50;
+const MAX_LIMIT = 2000;
 
-export function listHistory(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
+function clampLimit(limit: number): number {
+  return Math.max(1, Math.min(limit, MAX_LIMIT));
+}
+
+function clampOffset(offset: number): number {
+  return Math.max(0, offset);
+}
+
+export function listHistory(
+  viewerName?: string,
+  limit = PAGE_SIZE,
+  q?: string,
+  offset = 0
+): LibraryTrackSummary[] {
+  const o = clampOffset(offset);
+  const l = clampLimit(limit);
   return [...library.values()]
     .filter((e) => e.playCount > 0) // exclude upload placeholders that haven't actually played yet (see registerUpload)
     .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, q ? SEARCH_LIMIT : limit)
+    .slice(o, o + l)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listMostLiked(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
+export function listMostLiked(
+  viewerName?: string,
+  limit = PAGE_SIZE,
+  q?: string,
+  offset = 0
+): LibraryTrackSummary[] {
+  const o = clampOffset(offset);
+  const l = clampLimit(limit);
   return [...library.values()]
     .filter((e) => e.likes.length > 0 && (e.source === "youtube" || isSavedFileStillOnDisk(e)))
     .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.likes.length - a.likes.length || b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, q ? SEARCH_LIMIT : limit)
+    .slice(o, o + l)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listMostPlayed(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
+export function listMostPlayed(
+  viewerName?: string,
+  limit = PAGE_SIZE,
+  q?: string,
+  offset = 0
+): LibraryTrackSummary[] {
+  const o = clampOffset(offset);
+  const l = clampLimit(limit);
   return [...library.values()]
     .filter((e) => e.playCount > 0)
     .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.playCount - a.playCount || b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, q ? SEARCH_LIMIT : limit)
+    .slice(o, o + l)
     .map((e) => summarize(e, viewerName));
 }
 
-export function listSavedUploads(viewerName?: string, limit = 50, q?: string): LibraryTrackSummary[] {
+export function listSavedUploads(
+  viewerName?: string,
+  limit = PAGE_SIZE,
+  q?: string,
+  offset = 0
+): LibraryTrackSummary[] {
+  const o = clampOffset(offset);
+  const l = clampLimit(limit);
   return [...library.values()]
     .filter((e) => e.source === "upload" && isSavedFileStillOnDisk(e))
     .filter((e) => matchesQuery(e, q))
     .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, q ? SEARCH_LIMIT : limit)
+    .slice(o, o + l)
     .map((e) => summarize(e, viewerName));
 }

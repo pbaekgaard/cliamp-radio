@@ -579,7 +579,7 @@ function UploadTrackModal({
             checked={saveForLater}
             onChange={(e) => setSaveForLater(e.target.checked)}
           />
-          Save for 2 months (so it can be requeued later)
+          Save so it can be requeued later
         </label>
 
         {error && <div className="error">{error}</div>}
@@ -770,6 +770,102 @@ function AddTrackModal({
   );
 }
 
+/** Page size for useLibraryList()'s infinite scroll — must match the
+ * server's own PAGE_SIZE default (see workfmLibrary.ts) so "did this page
+ * come back short" reliably means "that's everything" rather than a
+ * mismatch producing a false "no more" or an endless extra round-trip. */
+const LIBRARY_PAGE_SIZE = 50;
+
+/** Shared infinite-scroll pagination for a /api/workfm/library view —
+ * fetches PAGE_SIZE at a time instead of the whole matching set up front,
+ * loading more only once the caller's scroll container nears the bottom
+ * (see its returned `onScroll`). Also keeps the already-loaded window
+ * gently live (polls every 5s, re-fetching exactly however many rows are
+ * currently shown) so newly played/liked/uploaded tracks and like-count
+ * changes show up without the user having to scroll or reopen anything.
+ * Resets back to a single page whenever `view` or `query` changes. */
+function useLibraryList(view: WorkFmLibraryView, query: string, active: boolean) {
+  const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+
+  // Always reflects the latest load so a slow in-flight request from a
+  // since-changed view/query can't clobber newer results when it resolves.
+  const requestIdRef = useRef(0);
+
+  const loadFirstPage = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    try {
+      const results = await api.workfmLibrary(view, query || undefined, 0, LIBRARY_PAGE_SIZE);
+      if (requestId !== requestIdRef.current) return;
+      setTracks(results);
+      setHasMore(results.length === LIBRARY_PAGE_SIZE);
+    } catch {
+      // ignore transient errors
+    }
+  }, [view, query]);
+
+  // Keeps the currently-visible window live without disturbing scroll
+  // position or pagination state — re-fetches exactly as many rows as are
+  // already loaded (never fewer, so nothing already on screen disappears).
+  const refreshVisible = useCallback(async () => {
+    const requestId = requestIdRef.current;
+    const count = Math.max(tracks.length, LIBRARY_PAGE_SIZE);
+    try {
+      const results = await api.workfmLibrary(view, query || undefined, 0, count);
+      if (requestId !== requestIdRef.current) return;
+      setTracks(results);
+      setHasMore(results.length === count);
+    } catch {
+      // ignore transient errors
+    }
+  }, [view, query, tracks.length]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const requestId = requestIdRef.current;
+    try {
+      const results = await api.workfmLibrary(view, query || undefined, tracks.length, LIBRARY_PAGE_SIZE);
+      if (requestId !== requestIdRef.current) return;
+      setTracks((prev) => [...prev, ...results]);
+      setHasMore(results.length === LIBRARY_PAGE_SIZE);
+    } catch {
+      // ignore transient errors
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [view, query, tracks.length, hasMore]);
+
+  // Reset to a fresh first page whenever the view or search query changes.
+  useEffect(() => {
+    if (!active) return;
+    setHasMore(true);
+    loadFirstPage();
+  }, [active, view, query, loadFirstPage]);
+
+  useEffect(() => {
+    if (!active) return;
+    const interval = setInterval(refreshVisible, 5000);
+    return () => clearInterval(interval);
+  }, [active, refreshVisible]);
+
+  // Fires on the scroll container's onScroll — kicks off loadMore() once
+  // the user's scrolled within one row's height of the bottom.
+  const onScroll = useCallback(
+    (e: React.UIEvent<HTMLElement>) => {
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 48) loadMore();
+    },
+    [loadMore]
+  );
+
+  return { tracks, hasMore, loadingMore, onScroll, reload: refreshVisible };
+}
+
 /** "/" shortcut opens this — a modal search bar over the play history,
  * so requeuing/liking a past track doesn't require opening the library
  * panel and scrolling to find it. */
@@ -784,39 +880,28 @@ function HistorySearchModal({
   onClose: () => void;
   onRequeued: () => void;
 }) {
-  const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Server-side search (see workfmLibrary.ts) so this actually scans the
-  // whole history, not just the 50 most recently played tracks.
-  const load = useCallback(async (q: string) => {
-    try {
-      setTracks(await api.workfmLibrary("history", q || undefined));
-    } catch {
-      // ignore transient errors
-    }
-  }, []);
-
+  // Debounce so every keystroke doesn't fire a request — the actual
+  // fetching/pagination is handled by useLibraryList below.
   useEffect(() => {
-    const timer = setTimeout(() => load(query), 200);
+    const timer = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(timer);
-  }, [query, load]);
+  }, [query]);
 
-  // Keep results reasonably live while the modal is open (newly-played
-  // tracks otherwise wouldn't show up until it was reopened).
-  useEffect(() => {
-    const interval = setInterval(() => load(query), 5000);
-    return () => clearInterval(interval);
-  }, [query, load]);
-
-  const filtered = tracks;
+  const { tracks, hasMore, loadingMore, onScroll, reload } = useLibraryList(
+    "history",
+    debouncedQuery,
+    true
+  );
 
   async function like(id: string) {
     if (!name) return;
     try {
       await api.workfmToggleLike(id);
-      load(query);
+      reload();
     } catch {
       // ignore
     }
@@ -857,8 +942,8 @@ function HistorySearchModal({
         />
       </div>
       {error && <div className="error">{error}</div>}
-      <ul className="workfm-command-results workfm-command-list">
-        {filtered.map((t) => (
+      <ul className="workfm-command-results workfm-command-list" onScroll={onScroll}>
+        {tracks.map((t) => (
           <li key={t.id} className="workfm-command-history-row">
             <div className="workfm-queue-row-info">
               <span className="workfm-queue-title">{t.title}</span>
@@ -884,10 +969,14 @@ function HistorySearchModal({
             </div>
           </li>
         ))}
-        {filtered.length === 0 && (
+        {tracks.length === 0 && (
           <li className="muted">
-            {tracks.length === 0 ? "Nothing here yet." : "No matches."}
+            {debouncedQuery ? "No matches." : "Nothing here yet."}
           </li>
+        )}
+        {loadingMore && <li className="muted">Loading more…</li>}
+        {!hasMore && tracks.length > 0 && (
+          <li className="muted workfm-library-list-end">That's everything.</li>
         )}
       </ul>
     </Modal>
@@ -1917,51 +2006,37 @@ function LibraryPanel({
   onRequeued: () => void;
 }) {
   const [view, setView] = useState<WorkFmLibraryView>("history");
-  const [tracks, setTracks] = useState<WorkFmLibraryTrack[]>([]);
   const [open, setOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-
-  // The search itself now runs server-side (see workfmLibrary.ts's
-  // matchesQuery) so it covers the *entire* library, not just whatever
-  // page of "most recent"/"most liked" happened to already be fetched.
-  const load = useCallback(async (q: string) => {
-    try {
-      setTracks(await api.workfmLibrary(view, q || undefined));
-    } catch {
-      // ignore transient errors
-    }
-  }, [view]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
 
   // Debounce so every keystroke doesn't fire a request.
   useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(() => load(query), 200);
+    const timer = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(timer);
-  }, [open, query, load]);
-
-  // Newly-played/uploaded/liked tracks otherwise wouldn't show up here
-  // until the user manually reopened the panel or changed tabs — poll
-  // gently while the panel is open so it stays reasonably live.
-  useEffect(() => {
-    if (!open) return;
-    const interval = setInterval(() => load(query), 5000);
-    return () => clearInterval(interval);
-  }, [open, query, load]);
+  }, [query]);
 
   // Reset any in-progress search when switching tabs, so a "saved uploads"
   // query doesn't silently keep filtering out history results (or vice versa).
   useEffect(() => {
     setQuery("");
+    setDebouncedQuery("");
   }, [view]);
 
-  const filteredTracks = tracks;
+  // Fetches PAGE_SIZE at a time (see useLibraryList), loading more only as
+  // the user scrolls the list, and keeps the visible window gently live.
+  const { tracks, hasMore, loadingMore, onScroll, reload } = useLibraryList(
+    view,
+    debouncedQuery,
+    open
+  );
 
   async function like(id: string) {
     if (!name) return;
     try {
       await api.workfmToggleLike(id);
-      load(query);
+      reload();
     } catch {
       // ignore
     }
@@ -2007,8 +2082,8 @@ function LibraryPanel({
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search library"
           />
-          <ul className="workfm-library-list workfm-library-list-scroll">
-            {filteredTracks.map((t) => (
+          <ul className="workfm-library-list workfm-library-list-scroll" onScroll={onScroll}>
+            {tracks.map((t) => (
               <li key={t.id} className="workfm-library-row">
                 <div className="workfm-queue-row-info">
                   <span className="workfm-queue-title">{t.title}</span>
@@ -2034,10 +2109,14 @@ function LibraryPanel({
                 </div>
               </li>
             ))}
-            {filteredTracks.length === 0 && (
+            {tracks.length === 0 && (
               <li className="muted">
-                {tracks.length === 0 ? "Nothing here yet." : "No matches."}
+                {debouncedQuery ? "No matches." : "Nothing here yet."}
               </li>
+            )}
+            {loadingMore && <li className="muted">Loading more…</li>}
+            {!hasMore && tracks.length > 0 && (
+              <li className="muted workfm-library-list-end">That's everything.</li>
             )}
           </ul>
         </div>

@@ -1194,7 +1194,8 @@ class WorkFmQueueStream {
    * request). For uploads it points straight at the shared saved file on
    * disk (see workfmLibrary.ts's listSavedUploads) — it's deliberately not
    * registered in `uploadFiles`, so cleanup after play never deletes the
-   * shared/retained asset (only the retention sweep in workfmLibrary.ts does).
+   * shared/retained asset. Saved uploads are kept indefinitely — no
+   * automatic time-based expiry.
    */
   requeueFromLibrary(entry: LibraryTrack, addedBy: string): QueueItem {
     if (this.queue.length >= MAX_QUEUE_LENGTH) throw new Error("the queue is full — try again once it's shorter");
@@ -1485,8 +1486,8 @@ class WorkFmQueueStream {
   /**
    * Picks the next track for the auto-DJ to play — a library entry from
    * history, shuffled — or null if there's nothing playable yet (fresh
-   * install with no history, or every saved upload has expired since being
-   * shuffled in). Refills+reshuffles `autoDjShuffle` from
+   * install with no history, or every entry shuffled in has since gone
+   * missing/been deleted). Refills+reshuffles `autoDjShuffle` from
    * listPlayableHistoryIds() once it runs out. Whatever's about to be drawn
    * next is never allowed to be `lastPlayedLibraryId` (whatever — auto-DJ'd
    * or manually requested — played immediately before this pick), swapping
@@ -1504,8 +1505,8 @@ class WorkFmQueueStream {
       }
       this.autoDjShuffle = ids;
     }
-    // Entries can have gone stale (e.g. a saved upload's TTL expired, or a
-    // youtube cache/upload file went missing on disk since being shuffled
+    // Entries can have gone stale (e.g. an admin deleted a saved upload, or
+    // a youtube cache/upload file went missing on disk since being shuffled
     // in) since they were shuffled in — re-fetch and skip any that are no
     // longer playable rather than surfacing a broken track.
     while (this.autoDjShuffle.length > 0) {

@@ -513,9 +513,16 @@ const server = Bun.serve<WorkFmWsData>({
       const identity = await resolveWorkFmIdentity(req);
       const view = url.searchParams.get("view") ?? "history";
       const q = url.searchParams.get("q") ?? undefined;
-      if (view === "most-liked") return json(listMostLiked(identity?.name, undefined, q));
-      if (view === "saved") return json(listSavedUploads(identity?.name, undefined, q));
-      return json(listHistory(identity?.name, undefined, q));
+      // Paginated (see workfmLibrary.ts's PAGE_SIZE/MAX_LIMIT) — the client
+      // fetches `offset`/`limit` pages as the user scrolls, rather than the
+      // whole matching set in one response.
+      const offsetParam = url.searchParams.get("offset");
+      const limitParam = url.searchParams.get("limit");
+      const offset = offsetParam ? Number(offsetParam) || 0 : undefined;
+      const limit = limitParam ? Number(limitParam) || undefined : undefined;
+      if (view === "most-liked") return json(listMostLiked(identity?.name, limit, q, offset));
+      if (view === "saved") return json(listSavedUploads(identity?.name, limit, q, offset));
+      return json(listHistory(identity?.name, limit, q, offset));
     }
 
     const workfmLikeMatch = pathname.match(/^\/api\/workfm\/library\/([^/]+)\/like$/);

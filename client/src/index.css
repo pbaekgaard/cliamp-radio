@@ -2520,6 +2520,12 @@ input {
   padding-right: 4px;
 }
 
+.workfm-library-list-end {
+  text-align: center;
+  font-size: 0.85em;
+  padding: 6px 0 2px;
+}
+
 .workfm-library-row {
   display: flex;
   justify-content: space-between;

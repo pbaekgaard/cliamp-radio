@@ -355,9 +355,12 @@ export const api = {
     request<WorkFmChatMessage>(`/api/workfm/rooms/${slug}/chat`, { method: "POST", body: JSON.stringify({ text }) }),
   workfmRequeue: (slug: string, id: string) =>
     request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue/requeue`, { method: "POST", body: JSON.stringify({ id }) }),
-  workfmLibrary: (view: WorkFmLibraryView = "history", q?: string) =>
+  // Paginated: `offset`/`limit` let callers (see WorkFm.tsx's
+  // useLibraryList) fetch one page at a time instead of the whole matching
+  // set, loading more only once the user scrolls near the bottom.
+  workfmLibrary: (view: WorkFmLibraryView = "history", q?: string, offset = 0, limit?: number) =>
     request<WorkFmLibraryTrack[]>(
-      `/api/workfm/library?view=${view}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+      `/api/workfm/library?view=${view}${q ? `&q=${encodeURIComponent(q)}` : ""}&offset=${offset}${limit ? `&limit=${limit}` : ""}`,
     ),
   workfmToggleLike: (id: string) =>
     request<{ likes: number; liked: boolean }>(`/api/workfm/library/${encodeURIComponent(id)}/like`, { method: "POST" }),
