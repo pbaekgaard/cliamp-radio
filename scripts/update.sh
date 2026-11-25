@@ -25,6 +25,37 @@ echo "==> Latest tag is ${LATEST_TAG}"
 echo "==> Checking out ${LATEST_TAG}"
 git checkout "${LATEST_TAG}"
 
+# yt-dlp has to keep up with YouTube's constantly changing player JS — a
+# months-old copy starts failing with "n challenge solving failed" / "The
+# page needs to be reloaded". Upgrade it on every update. Best-effort: a
+# failure here never blocks the rest of the update.
+upgrade_ytdlp() {
+  local bin py
+  bin=$(command -v yt-dlp 2>/dev/null) || { echo "    yt-dlp not found on PATH; skipping"; return 0; }
+  if command -v pipx >/dev/null 2>&1 && pipx list --short 2>/dev/null | grep -q '^yt-dlp '; then
+    pipx upgrade yt-dlp && return 0
+  fi
+  py=$(head -n1 "$bin" | sed -n 's/^#!\s*//p' | awk '{print $1}')
+  if [[ -n "$py" && "$py" == *python* && -x "$py" ]]; then
+    # yt-dlp[default] also pulls in yt-dlp-ejs, the bundled YouTube challenge solver.
+    "$py" -m pip install --quiet --upgrade "yt-dlp[default]" && return 0
+    # A --user install on a PEP 668 ("externally managed") distro only
+    # touches ~/.local, never system packages, so this override is safe there.
+    if [[ "$bin" == "$HOME/.local/"* ]]; then
+      "$py" -m pip install --quiet --user --break-system-packages --upgrade "yt-dlp[default]" && return 0
+    fi
+  fi
+  yt-dlp -U && return 0
+  return 1
+}
+
+echo "==> Upgrading yt-dlp"
+if upgrade_ytdlp; then
+  echo "    yt-dlp is now $(yt-dlp --version 2>/dev/null || echo unknown)"
+else
+  echo "==> WARNING: couldn't upgrade yt-dlp automatically — upgrade it by hand (e.g. 'pip install -U \"yt-dlp[default]\"')." >&2
+fi
+
 echo "==> Installing server dependencies"
 (cd server && bun install --frozen-lockfile)
 

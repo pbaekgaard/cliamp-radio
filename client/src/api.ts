@@ -77,6 +77,16 @@ export interface PlaylistStreamStatus {
   nowPlaying: { artist: string; title: string } | null;
 }
 
+export interface WorkFmPlaylist {
+  id: string;
+  title: string;
+  entries: WorkFmSearchResult[];
+  /** More songs than the server lists (also always true for endless Mixes). */
+  truncated: boolean;
+  /** Most songs this user may add per request — null for admins (no cap). */
+  maxAdd: number | null;
+}
+
 export interface WorkFmSearchResult {
   videoId: string;
   title: string;
@@ -327,6 +337,13 @@ export const api = {
   workfmQueue: (slug: string) => request<WorkFmQueueState>(`/api/workfm/rooms/${slug}/queue`),
   workfmAddToQueue: (slug: string, url: string) =>
     request<WorkFmQueueItem>(`/api/workfm/rooms/${slug}/queue`, { method: "POST", body: JSON.stringify({ url }) }),
+  workfmPlaylist: (slug: string, url: string) =>
+    request<WorkFmPlaylist>(`/api/workfm/rooms/${slug}/playlist?url=${encodeURIComponent(url)}`),
+  workfmAddFromPlaylist: (slug: string, url: string, videoIds: string[]) =>
+    request<{ added: WorkFmQueueItem[] }>(`/api/workfm/rooms/${slug}/queue/playlist`, {
+      method: "POST",
+      body: JSON.stringify({ url, videoIds }),
+    }),
   workfmSearch: (slug: string, q: string) =>
     request<{ results: WorkFmSearchResult[] }>(`/api/workfm/rooms/${slug}/search?q=${encodeURIComponent(q)}`),
   workfmUploadToQueue: async (

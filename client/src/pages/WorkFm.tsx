@@ -11,6 +11,7 @@ import {
   api,
   type WorkFmChatMessage,
   type WorkFmMostPlayedEntry,
+  type WorkFmPlaylist,
   type WorkFmLibraryTrack,
   type WorkFmLibraryView,
   type WorkFmMember,
@@ -45,6 +46,12 @@ function isYouTubeUrl(value: string): boolean {
   return /^https?:\/\/(www\.|music\.)?(youtube\.com|youtu\.be)\//i.test(
     value.trim(),
   );
+}
+
+/** A YouTube link carrying a `list=` param — opens the playlist picker
+ * (see PlaylistPickerModal) instead of adding a single video. */
+function isYouTubePlaylistUrl(value: string): boolean {
+  return isYouTubeUrl(value) && /[?&]list=[a-zA-Z0-9_-]+/.test(value);
 }
 
 function formatClock(totalSeconds: number): string {
@@ -631,11 +638,13 @@ function AddTrackModal({
   onClose,
   onAdded,
   onUpload,
+  onPlaylist,
 }: {
   slug: string;
   onClose: () => void;
   onAdded: () => void;
   onUpload: () => void;
+  onPlaylist: (url: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<WorkFmSearchResult[]>([]);
@@ -686,6 +695,10 @@ function AddTrackModal({
     e.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
+    if (isYouTubePlaylistUrl(trimmed)) {
+      onPlaylist(trimmed);
+      return;
+    }
     if (isYouTubeUrl(trimmed)) {
       await addUrl(trimmed);
       return;
@@ -766,6 +779,151 @@ function AddTrackModal({
           </button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** Opened when a YouTube playlist link is pasted: lists the playlist's
+ * songs so the user can tick which ones to queue, or add them all.
+ * Non-admins are capped at `maxAdd` songs per add (enforced server-side
+ * too) — their "Add all" adds the first `maxAdd` instead. */
+function PlaylistPickerModal({
+  slug,
+  url,
+  onClose,
+  onAdded,
+}: {
+  slug: string;
+  url: string;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [playlist, setPlaylist] = useState<WorkFmPlaylist | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .workfmPlaylist(slug, url)
+      .then((p) => !cancelled && setPlaylist(p))
+      .catch((err) => !cancelled && setLoadError(err instanceof Error ? err.message : String(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, url]);
+
+  const maxAdd = playlist?.maxAdd ?? null;
+  const atLimit = maxAdd != null && selected.size >= maxAdd;
+
+  function toggle(videoId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(videoId)) next.delete(videoId);
+      else if (maxAdd == null || next.size < maxAdd) next.add(videoId);
+      return next;
+    });
+  }
+
+  async function add(videoIds: string[]) {
+    if (videoIds.length === 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.workfmAddFromPlaylist(slug, url, videoIds);
+      onAdded();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const entries = playlist?.entries ?? [];
+  const addAllIds = entries.slice(0, maxAdd ?? entries.length).map((e) => e.videoId);
+
+  return (
+    <Modal
+      title={playlist?.title ?? "YouTube playlist"}
+      onClose={onClose}
+      className="workfm-command-modal workfm-playlist-modal"
+      overlayClassName="workfm-command-overlay"
+    >
+      {!playlist && !loadError && (
+        <div className="workfm-search-status muted">Loading playlist…</div>
+      )}
+      {loadError && <div className="error">{loadError}</div>}
+      {playlist && (
+        <>
+          <p className="muted workfm-playlist-hint">
+            {entries.length}
+            {playlist.truncated ? "+" : ""} songs
+            {maxAdd != null && ` · you can add up to ${maxAdd} at a time`}
+          </p>
+          {error && <div className="error">{error}</div>}
+          <ul className="workfm-command-results workfm-command-list workfm-playlist-list">
+            {entries.map((r) => {
+              const checked = selected.has(r.videoId);
+              return (
+                <li key={r.videoId}>
+                  <label
+                    className={`workfm-command-result workfm-playlist-row${!checked && atLimit ? " workfm-playlist-row-disabled" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={submitting || (!checked && atLimit)}
+                      onChange={() => toggle(r.videoId)}
+                    />
+                    {r.thumbnail ? (
+                      <img src={r.thumbnail} alt="" />
+                    ) : (
+                      <div className="workfm-command-result-fallback">
+                        <PlusIcon />
+                      </div>
+                    )}
+                    <div className="workfm-search-result-meta">
+                      <div className="workfm-search-result-title">{r.title}</div>
+                      <div className="muted">
+                        {r.uploader ?? "Unknown"}
+                        {typeof r.durationSec === "number"
+                          ? ` · ${formatClock(r.durationSec)}`
+                          : ""}
+                      </div>
+                    </div>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="workfm-modal-actions">
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={submitting || addAllIds.length === 0}
+              onClick={() => add(addAllIds)}
+            >
+              {maxAdd != null && entries.length > maxAdd
+                ? `Add first ${maxAdd}`
+                : `Add all (${entries.length})`}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={submitting || selected.size === 0}
+              onClick={() => add(entries.filter((e) => selected.has(e.videoId)).map((e) => e.videoId))}
+            >
+              {submitting ? "Adding…" : `Add selected (${selected.size})`}
+            </button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
@@ -2210,6 +2368,7 @@ function RoomPage({ slug }: { slug: string }) {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAddTrackModal, setShowAddTrackModal] = useState(false);
+  const [playlistPickerUrl, setPlaylistPickerUrl] = useState<string | null>(null);
   const [showHistorySearchModal, setShowHistorySearchModal] = useState(false);
   const [showKeybindsModal, setShowKeybindsModal] = useState(false);
   // Flips the now-playing hero card around to reveal the most-played
@@ -2257,7 +2416,8 @@ function RoomPage({ slug }: { slug: string }) {
         showUploadModal ||
         showAddTrackModal ||
         showHistorySearchModal ||
-        showKeybindsModal;
+        showKeybindsModal ||
+        !!playlistPickerUrl;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -2292,6 +2452,7 @@ function RoomPage({ slug }: { slug: string }) {
     showAddTrackModal,
     showHistorySearchModal,
     showKeybindsModal,
+    playlistPickerUrl,
     toggleMute,
   ]);
 
@@ -2331,6 +2492,11 @@ function RoomPage({ slug }: { slug: string }) {
       // Enter pressed on a search query (rather than a pasted link) — add
       // the top result, same as clicking the first row in the dropdown.
       if (searchResults[0]) await addFromSearch(searchResults[0]);
+      return;
+    }
+    if (isYouTubePlaylistUrl(trimmed)) {
+      setPlaylistPickerUrl(trimmed);
+      setUrl("");
       return;
     }
     setSubmitting(true);
@@ -2541,6 +2707,18 @@ function RoomPage({ slug }: { slug: string }) {
             setShowAddTrackModal(false);
             setShowUploadModal(true);
           }}
+          onPlaylist={(playlistUrl) => {
+            setShowAddTrackModal(false);
+            setPlaylistPickerUrl(playlistUrl);
+          }}
+        />
+      )}
+      {playlistPickerUrl && (
+        <PlaylistPickerModal
+          slug={slug}
+          url={playlistPickerUrl}
+          onClose={() => setPlaylistPickerUrl(null)}
+          onAdded={poll}
         />
       )}
       {showHistorySearchModal && (
@@ -2710,7 +2888,12 @@ function RoomPage({ slug }: { slug: string }) {
                         (!isYouTubeUrl(url) && searchResults.length === 0)
                       }
                     >
-                      <PlusIcon /> {submitting ? "Adding…" : "Add"}
+                      <PlusIcon />{" "}
+                      {submitting
+                        ? "Adding…"
+                        : isYouTubePlaylistUrl(url)
+                          ? "Pick songs"
+                          : "Add"}
                     </button>
                   </form>
                   {showResults && url.trim() && !isYouTubeUrl(url) && (

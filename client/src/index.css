@@ -3396,3 +3396,32 @@ input {
   letter-spacing: normal;
   text-align: left;
 }
+
+/* Playlist picker (pasted YouTube playlist link) — checkbox rows reuse the
+ * command-palette result styling. */
+.workfm-playlist-hint {
+  margin: 0 0 8px;
+  font-size: 0.85em;
+}
+
+.workfm-playlist-list {
+  max-height: 420px;
+}
+
+.workfm-playlist-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.workfm-playlist-row-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.workfm-playlist-modal .workfm-modal-actions {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}

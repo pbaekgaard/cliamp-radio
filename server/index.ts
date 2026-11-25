@@ -14,7 +14,7 @@ import { createWorkFmSessionToken, WORKFM_SESSION_COOKIE, getWorkFmIdentity, nor
 import { getColorForName, PRESET_COLORS, renameColorOverride, setColorForName } from "./lib/workfmColors";
 import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT, type WorkFmWsData } from "./lib/workfmQueue";
-import { drainText, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
+import { drainText, fetchYouTubePlaylist, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
 import { extractSpotifyTrackId, resolveSpotifyTrack } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
@@ -41,6 +41,8 @@ import { getOrCreatePlaylistStream, getPlaylistStreamStatus, ICY_METAINT, prewar
 
 const PORT = Number(process.env.PORT || 8000);
 const CLIENT_DIST = path.join(import.meta.dir, "..", "client", "dist");
+// Most songs a non-admin can add from a pasted YouTube playlist in one go.
+const WORKFM_PLAYLIST_MAX_NON_ADMIN = 3;
 
 function json(data: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(data), {
@@ -368,6 +370,50 @@ const server = Bun.serve<WorkFmWsData>({
         return json(item, { status: 201 });
       } catch (err) {
         return json({ error: err instanceof Error ? err.message : "failed to add to queue" }, { status: 400 });
+      }
+    }
+
+    // Lists a pasted YouTube playlist's songs so the user can pick which to
+    // queue. Non-admins may add at most WORKFM_PLAYLIST_MAX_NON_ADMIN per add.
+    const workfmRoomPlaylistMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/playlist$/);
+    if (workfmRoomPlaylistMatch && req.method === "GET") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomPlaylistMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = await resolveWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const playlistUrl = url.searchParams.get("url")?.trim() ?? "";
+      try {
+        const playlist = await fetchYouTubePlaylist(playlistUrl);
+        return json({ ...playlist, maxAdd: identity.isAdmin ? null : WORKFM_PLAYLIST_MAX_NON_ADMIN });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "couldn't read that playlist" }, { status: 400 });
+      }
+    }
+
+    const workfmRoomQueuePlaylistMatch = pathname.match(/^\/api\/workfm\/rooms\/([^/]+)\/queue\/playlist$/);
+    if (workfmRoomQueuePlaylistMatch && req.method === "POST") {
+      const room = getWorkFmRoom(decodeURIComponent(workfmRoomQueuePlaylistMatch[1]!));
+      if (!room) return json({ error: "room not found" }, { status: 404 });
+      const identity = await resolveWorkFmIdentity(req);
+      if (!identity) return unauthorized();
+      const body = (await req.json().catch(() => null)) as { url?: unknown; videoIds?: unknown } | null;
+      const videoIds = body?.videoIds;
+      if (typeof body?.url !== "string" || !Array.isArray(videoIds) || !videoIds.every((v) => typeof v === "string")) {
+        return json({ error: "url and videoIds required" }, { status: 400 });
+      }
+      const wanted = new Set(videoIds as string[]);
+      if (!identity.isAdmin && wanted.size > WORKFM_PLAYLIST_MAX_NON_ADMIN) {
+        return json({ error: `you can add at most ${WORKFM_PLAYLIST_MAX_NON_ADMIN} songs from a playlist at a time` }, { status: 403 });
+      }
+      try {
+        // Re-validated against the real (cached) playlist so clients can't
+        // inject arbitrary titles/ids — only songs actually in it get added.
+        const playlist = await fetchYouTubePlaylist(body.url);
+        const entries = playlist.entries.filter((e) => wanted.has(e.videoId));
+        const items = room.stream.addYoutubeEntries(entries, identity.name);
+        return json({ added: items }, { status: 201 });
+      } catch (err) {
+        return json({ error: err instanceof Error ? err.message : "failed to add songs" }, { status: 400 });
       }
     }
 

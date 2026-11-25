@@ -1115,6 +1115,40 @@ class WorkFmQueueStream {
     return item;
   }
 
+  /** Adds several already-resolved YouTube videos (e.g. picked from a
+   * playlist — see fetchYouTubePlaylist) in one go, using the metadata the
+   * playlist listing already gave us instead of a per-video yt-dlp lookup.
+   * All-or-nothing on queue capacity, so a big batch can't half-fill it. */
+  addYoutubeEntries(
+    entries: { videoId: string; title: string; uploader: string | null; durationSec?: number }[],
+    addedBy: string
+  ): QueueItem[] {
+    if (entries.length === 0) throw new Error("pick at least one song");
+    const room = MAX_QUEUE_LENGTH - this.queue.length;
+    if (room <= 0) throw new Error("the queue is full — try again once it's shorter");
+    if (entries.length > room) throw new Error(`only room for ${room} more song${room === 1 ? "" : "s"} in the queue`);
+
+    const items = entries.map((entry): QueueItem => {
+      const { artist, title } = parseArtistTitle(entry.title, entry.uploader);
+      return {
+        id: this.nextId++,
+        videoId: entry.videoId,
+        url: `https://www.youtube.com/watch?v=${entry.videoId}`,
+        artist,
+        title,
+        addedBy,
+        addedAt: Date.now(),
+        source: "youtube",
+        libraryId: `yt:${entry.videoId}`,
+        durationSec: entry.durationSec != null ? Math.round(entry.durationSec) : undefined,
+      };
+    });
+    this.queue.push(...items);
+    this.start();
+    this.notifyState();
+    return items;
+  }
+
   /**
    * Saves an uploaded mp3 to disk and adds it to the queue. If `saveForLater`
    * is set, a persistent copy is written into workfmLibrary's saved-uploads

@@ -185,30 +185,120 @@ async function runYtDlpSearch(targetArgs: string[], opts: { flat: boolean }): Pr
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const entry = JSON.parse(line);
-      if (typeof entry.id !== "string" || !VIDEO_ID_RE.test(entry.id)) continue;
-      const thumbnails = Array.isArray(entry.thumbnails) ? entry.thumbnails : [];
-      const thumbnail = thumbnails.length ? thumbnails[thumbnails.length - 1]?.url : undefined;
-      // Full (non-flat) metadata carries the real artist credit as
-      // "artist" (e.g. "Daft Punk, Pharrell Williams"), which is what we
-      // want for YT Music results — flat results only have "channel"/
-      // "uploader", which is often just the primary artist's channel name.
-      const uploader =
-        typeof entry.artist === "string"
-          ? entry.artist
-          : typeof entry.channel === "string"
-            ? entry.channel
-            : entry.uploader ?? null;
-      results.push({
-        videoId: entry.id,
-        title: typeof entry.title === "string" ? entry.title : "Untitled",
-        uploader,
-        durationSec: typeof entry.duration === "number" ? entry.duration : undefined,
-        thumbnail,
-      });
+      const result = toSearchResult(JSON.parse(line));
+      if (result) results.push(result);
     } catch {
       // skip malformed line — best-effort parsing of yt-dlp's JSON stream
     }
   }
   return results;
+}
+
+/** Turns one yt-dlp JSON entry (search result or flat playlist entry) into
+ * a YouTubeSearchResult — null for anything that isn't a real, playable
+ * video (bad id, or a private/deleted placeholder in a playlist). */
+function toSearchResult(entry: any): YouTubeSearchResult | null {
+  if (!entry || typeof entry.id !== "string" || !VIDEO_ID_RE.test(entry.id)) return null;
+  const title = typeof entry.title === "string" ? entry.title : "Untitled";
+  if (/^\[(Private|Deleted|Unavailable)/i.test(title)) return null;
+  const thumbnails = Array.isArray(entry.thumbnails) ? entry.thumbnails : [];
+  const thumbnail = thumbnails.length ? thumbnails[thumbnails.length - 1]?.url : undefined;
+  // Full (non-flat) metadata carries the real artist credit as
+  // "artist" (e.g. "Daft Punk, Pharrell Williams"), which is what we
+  // want for YT Music results — flat results only have "channel"/
+  // "uploader", which is often just the primary artist's channel name.
+  const uploader =
+    typeof entry.artist === "string"
+      ? entry.artist
+      : typeof entry.channel === "string"
+        ? entry.channel
+        : entry.uploader ?? null;
+  return {
+    videoId: entry.id,
+    title,
+    uploader,
+    durationSec: typeof entry.duration === "number" ? entry.duration : undefined,
+    thumbnail,
+  };
+}
+
+export interface YouTubePlaylist {
+  id: string;
+  title: string;
+  entries: YouTubeSearchResult[];
+  /** True when the playlist had more than MAX_PLAYLIST_ENTRIES and the
+   * rest were cut off (also always the case for endless "Radio"/Mix lists). */
+  truncated: boolean;
+}
+
+const MAX_PLAYLIST_ENTRIES = 200;
+const PLAYLIST_CACHE_TTL_MS = 10 * 60 * 1000;
+const playlistCache = new Map<string, { at: number; playlist: YouTubePlaylist }>();
+
+/**
+ * Lists a YouTube playlist's videos (WorkFM's "pick songs from a pasted
+ * playlist link" picker). `--flat-playlist` only reads the playlist page
+ * itself — no per-video lookups/format resolution — so it's fast and
+ * doesn't depend on yt-dlp's per-video JS challenge solving. Cached briefly
+ * per playlist id so the picker's "add" request (which re-validates the
+ * chosen ids against the real playlist server-side) doesn't re-run yt-dlp.
+ */
+export async function fetchYouTubePlaylist(url: string): Promise<YouTubePlaylist> {
+  const playlistId = extractYouTubePlaylistId(url);
+  if (!playlistId) throw new Error("that doesn't look like a YouTube playlist link");
+
+  const cached = playlistCache.get(playlistId);
+  if (cached && Date.now() - cached.at < PLAYLIST_CACHE_TTL_MS) return cached.playlist;
+
+  // Mixes/"Radio" lists (RD…) only resolve relative to their seed video,
+  // so keep the original watch URL for those; anything else goes through
+  // the canonical playlist page.
+  const videoId = extractYouTubeVideoId(url);
+  const target = playlistId.startsWith("RD") && videoId
+    ? `https://www.youtube.com/watch?v=${videoId}&list=${playlistId}`
+    : `https://www.youtube.com/playlist?list=${playlistId}`;
+
+  const proc = Bun.spawn(
+    [
+      "yt-dlp",
+      ...YTDLP_COOKIE_ARGS,
+      ...YTDLP_EXTRA_ARGS,
+      "--yes-playlist",
+      "--flat-playlist",
+      "--ignore-errors",
+      "--playlist-items",
+      `1-${MAX_PLAYLIST_ENTRIES + 1}`,
+      "-J",
+      target,
+    ],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    drainText(proc.stderr),
+    proc.exited,
+  ]);
+  let data: any = null;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    // handled below
+  }
+  if (!data) {
+    throw new Error(`couldn't read that playlist${exitCode !== 0 && stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+  }
+  const all = (Array.isArray(data.entries) ? data.entries : [])
+    .map(toSearchResult)
+    .filter((e: YouTubeSearchResult | null): e is YouTubeSearchResult => !!e);
+  if (all.length === 0) throw new Error("that playlist is empty, private, or couldn't be read");
+
+  const playlist: YouTubePlaylist = {
+    id: playlistId,
+    title: typeof data.title === "string" ? data.title : "YouTube playlist",
+    entries: all.slice(0, MAX_PLAYLIST_ENTRIES),
+    truncated: all.length > MAX_PLAYLIST_ENTRIES,
+  };
+  if (playlistCache.size >= 50) playlistCache.delete(playlistCache.keys().next().value!);
+  playlistCache.set(playlistId, { at: Date.now(), playlist });
+  return playlist;
 }
