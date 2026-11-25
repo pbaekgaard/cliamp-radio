@@ -1,3 +1,4 @@
+import { ytdlpBin } from "./ytdlpBinary";
 const PLAYLIST_ID_RE = /[?&]list=([a-zA-Z0-9_-]+)/;
 const VIDEO_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
 const YT_HOSTNAMES = /(^|\.)youtube\.com$|(^|\.)music\.youtube\.com$|(^|\.)youtu\.be$/;
@@ -163,7 +164,7 @@ export async function searchYouTubeMusic(query: string, limit = 8): Promise<YouT
 async function runYtDlpSearch(targetArgs: string[], opts: { flat: boolean }): Promise<YouTubeSearchResult[]> {
   const proc = Bun.spawn(
     [
-      "yt-dlp",
+      ytdlpBin(),
       ...YTDLP_COOKIE_ARGS,
       ...YTDLP_EXTRA_ARGS,
       ...targetArgs,
@@ -260,7 +261,7 @@ export async function fetchYouTubePlaylist(url: string): Promise<YouTubePlaylist
 
   const proc = Bun.spawn(
     [
-      "yt-dlp",
+      ytdlpBin(),
       ...YTDLP_COOKIE_ARGS,
       ...YTDLP_EXTRA_ARGS,
       "--yes-playlist",

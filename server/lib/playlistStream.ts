@@ -1,5 +1,6 @@
 import { relayPaced } from "./audioRelay";
 import { drainText, extractYouTubePlaylistId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
+import { ytdlpBin } from "./ytdlpBinary";
 import { listStations } from "./stations";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ function encodeIcyMeta(nowPlaying: string): Uint8Array {
 async function fetchPlaylistEntries(playlistUrl: string): Promise<PlaylistEntry[]> {
   const proc = Bun.spawn(
     [
-      "yt-dlp",
+      ytdlpBin(),
       ...YTDLP_COOKIE_ARGS,
       ...YTDLP_EXTRA_ARGS,
       "--flat-playlist",
@@ -218,7 +219,7 @@ class PlaylistStream {
   private async playEntry(entry: PlaylistEntry, gen: number): Promise<void> {
     const ytdlp = Bun.spawn(
       [
-        "yt-dlp",
+        ytdlpBin(),
         ...YTDLP_COOKIE_ARGS,
         ...YTDLP_EXTRA_ARGS,
         "-f",

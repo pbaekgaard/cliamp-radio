@@ -15,6 +15,7 @@ import { getColorForName, PRESET_COLORS, renameColorOverride, setColorForName } 
 import { deleteLibraryEntry, getLibraryTrack, listHistory, listMostLiked, listSavedUploads, toggleLike } from "./lib/workfmLibrary";
 import { ICY_METAINT as WORKFM_ICY_METAINT, type WorkFmWsData } from "./lib/workfmQueue";
 import { drainText, fetchYouTubePlaylist, searchYouTube, searchYouTubeMusic, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./lib/youtube";
+import { startYtdlpUpdater, ytdlpBin } from "./lib/ytdlpBinary";
 import { extractSpotifyTrackId, resolveSpotifyTrack } from "./lib/spotify";
 import { getWorkFmRoom, startWorkFmRoom, stopWorkFmRoom, WORKFM_ROOM_SLUG } from "./lib/workfmRooms";
 import { activeListens, getAllTimeStats, getLiveStats, recordListen } from "./lib/listeners";
@@ -91,6 +92,8 @@ async function resolveWorkFmIdentity(req: Request): Promise<{ name: string; id: 
   const identity = getWorkFmIdentity(req);
   return identity ? { ...identity, isAdmin: false } : null;
 }
+
+startYtdlpUpdater();
 
 const server = Bun.serve<WorkFmWsData>({
   port: PORT,
@@ -767,7 +770,7 @@ const server = Bun.serve<WorkFmWsData>({
       const tmpPath = path.join(tmpDir, `${tmpId}.mp3`);
       const proc = Bun.spawn(
         [
-          "yt-dlp",
+          ytdlpBin(),
           ...YTDLP_COOKIE_ARGS,
           ...YTDLP_EXTRA_ARGS,
           "-x",

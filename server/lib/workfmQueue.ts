@@ -4,6 +4,7 @@ import path from "node:path";
 import { relayPaced } from "./audioRelay";
 import { attachSavedUpload, attachYoutubeCache, getCachedYoutubeFile, getLibraryTrack, isSavedFileStillOnDisk, listMostLiked, listMostPlayed, listPlayableHistoryIds, recordPlay, registerUpload, SAVED_UPLOADS_DIR, YOUTUBE_CACHE_DIR, type LibraryTrack } from "./workfmLibrary";
 import { drainText, extractYouTubeVideoId, parseArtistTitle, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
+import { ytdlpBin } from "./ytdlpBinary";
 import {
   announcementFilePath,
   listAnnouncementFiles,
@@ -334,7 +335,7 @@ function encodeIcyMeta(nowPlaying: string): Uint8Array {
 async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: string | null; durationSec?: number }> {
   const proc = Bun.spawn(
     [
-      "yt-dlp",
+      ytdlpBin(),
       ...YTDLP_COOKIE_ARGS,
       ...YTDLP_EXTRA_ARGS,
       "--no-playlist",
@@ -365,7 +366,7 @@ async function fetchVideoInfo(url: string): Promise<{ title: string; uploader: s
 async function probeUrlDurationSec(url: string): Promise<number | undefined> {
   try {
     const proc = Bun.spawn(
-      ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "--no-playlist", "--skip-download", "--print", "%(duration)s", url],
+      [ytdlpBin(), ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "--no-playlist", "--skip-download", "--print", "%(duration)s", url],
       { stdout: "pipe", stderr: "pipe" }
     );
     const text = await new Response(proc.stdout).text();
@@ -1662,7 +1663,7 @@ class WorkFmQueueStream {
     const finalPath = path.join(PREFETCH_DIR, `${id}.mp3`);
     try {
       const proc = Bun.spawn(
-        ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-x", "--audio-format", "mp3", "--no-playlist", "--quiet", "--no-warnings", "-o", outputTemplate, item.url],
+        [ytdlpBin(), ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-x", "--audio-format", "mp3", "--no-playlist", "--quiet", "--no-warnings", "-o", outputTemplate, item.url],
         { stdout: "pipe", stderr: "pipe" }
       );
       const exitCode = await proc.exited;
@@ -2081,7 +2082,7 @@ class WorkFmQueueStream {
     this.ensureYoutubeCached(entry);
 
     const ytdlp = Bun.spawn(
-      ["yt-dlp", ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
+      [ytdlpBin(), ...YTDLP_COOKIE_ARGS, ...YTDLP_EXTRA_ARGS, "-f", "bestaudio/best", "--no-playlist", "--quiet", "--no-warnings", "-o", "-", entry.url],
       { stdout: "pipe", stderr: "pipe" }
     );
     // No `-re` here: pacing ffmpeg's *reads* off the piped yt-dlp download

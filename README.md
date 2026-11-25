@@ -176,6 +176,11 @@ this server itself:
   [yt-dlp install docs](https://github.com/yt-dlp/yt-dlp#installation)).
   Plain (non-playlist) YouTube video links are unaffected and still play
   directly as before.
+- **yt-dlp is kept up to date automatically.** On startup (and every 12
+  hours) the server downloads/self-updates yt-dlp's standalone release
+  binary into `server/data/bin/yt-dlp` and uses it for everything, since a
+  stale yt-dlp quickly stops being able to play YouTube. The system
+  `yt-dlp` is only used as a fallback; set `YTDLP_PATH` to pin your own.
 - **YouTube may block a server's IP outright** with `Sign in to confirm
   you're not a bot`, especially on datacenter/VPS IPs — this is YouTube
   bot-detection, not a bug in this app, and there's no way to make it 100%

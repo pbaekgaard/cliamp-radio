@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { drainText, extractYouTubeVideoId, YTDLP_COOKIE_ARGS, YTDLP_EXTRA_ARGS } from "./youtube";
+import { ytdlpBin } from "./ytdlpBinary";
 
 // ---------------------------------------------------------------------------
 // Admin-uploaded mp3 files that WorkFM's auto-DJ (see workfmQueue.ts's
@@ -115,7 +116,7 @@ export async function saveAnnouncementFromYouTube(
 
   const proc = Bun.spawn(
     [
-      "yt-dlp",
+      ytdlpBin(),
       ...YTDLP_COOKIE_ARGS,
       ...YTDLP_EXTRA_ARGS,
       "-x",
